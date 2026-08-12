@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api';
 import type { AuthUser } from '../../api';
-import type { LmsGroupView } from '../../types';
+import type { LmsGroupView, LmsHistoryRow } from '../../types';
 import {
   Bar,
   Card,
@@ -28,6 +28,16 @@ export default function GroupDetailPage() {
   const users = useAsync<AuthUser[]>(() => api.listUsers(), []);
   const [editing, setEditing] = useState(false);
   const [sel, setSel] = useState<number[]>([]);
+  const [historyOwner, setHistoryOwner] = useState('');
+  const [historyRows, setHistoryRows] = useState<LmsHistoryRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const openHistory = async (username: string) => {
+    setHistoryOwner(username); setHistoryRows([]); setHistoryLoading(true);
+    try { setHistoryRows(await api.lmsInstructorOperatorHistory(username)); }
+    catch (e) { notifyToast(`Ошибка: ${e instanceof Error ? e.message : e}`); }
+    finally { setHistoryLoading(false); }
+  };
 
   const openEditor = () => {
     setSel((data?.members ?? []).map((m) => m.user_id));
@@ -91,6 +101,7 @@ export default function GroupDetailPage() {
                     <td>
                       <div className="bold">{m.full_name || m.username}</div>
                       <div className="muted" style={{ fontSize: 11 }}>@{m.username}</div>
+                      <button className="btn btn-small" onClick={() => void openHistory(m.username)}>История сессий</button>
                     </td>
                     <td><Chip tone="accent">{m.stage || 'Стажер'}</Chip></td>
                     <td className="num bold">{m.course_progress.toFixed(0)}</td>
@@ -103,7 +114,14 @@ export default function GroupDetailPage() {
                       </div>
                     </td>
                     <td className="muted" style={{ fontSize: 11.5 }}>
-                      {m.last_session ? fmtDateTime(m.last_session.wall_start) : '—'}
+                      {m.last_session ? (
+                        <div className="col" style={{ gap: 4 }}>
+                          <span>{fmtDateTime(m.last_session.wall_start)}</span>
+                          <button className="btn btn-small" onClick={() => navigate(`/debrief/${m.last_session?.session_id}`)}>
+                            Открыть и разметить
+                          </button>
+                        </div>
+                      ) : '—'}
                     </td>
                     <td className="num bold">
                       {m.last_session?.performance_score != null
@@ -117,6 +135,29 @@ export default function GroupDetailPage() {
           </div>
         )}
       </Card>
+
+      {historyOwner && (
+        <div className="modal-overlay" onClick={() => setHistoryOwner('')}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="page-title" style={{ fontSize: 16 }}>История сессий @{historyOwner}</div>
+            {historyLoading ? <Loader /> : historyRows.length === 0 ? <Empty text="Завершённых сессий нет" /> : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Дата</th><th>Сценарий</th><th>Балл</th><th /></tr></thead>
+                  <tbody>{historyRows.map((row) => (
+                    <tr key={row.session_id}>
+                      <td>{fmtDateTime(row.wall_start)}</td><td>{row.scenario_name || row.scenario_id}</td>
+                      <td className="num">{fmtScore(row.performance_score)}</td>
+                      <td><button className="btn btn-small" onClick={() => navigate(`/debrief/${row.session_id}`)}>Разметить</button></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+            <button className="btn" onClick={() => setHistoryOwner('')}>Закрыть</button>
+          </div>
+        </div>
+      )}
 
       <Card title="Компетенции участников" subtitle="Карта компетенций группы">
         {g.members.length === 0 ? (

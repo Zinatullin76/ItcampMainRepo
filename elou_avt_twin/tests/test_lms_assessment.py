@@ -56,8 +56,34 @@ def test_every_tracked_error_reduces_score_and_is_explained():
     assert result["criteria"]["errors"]["score"] == 55.0
     assert result["criteria"]["safety"]["score"] == 50.0
     assert result["score"] < 100.0
-    assert any("Нарушена последовательность" in message for message in bad)
-    assert any("штраф" in message for message in bad)
+    assert not any("Нарушена последовательность" in message for message in bad)
+    assert not any("Ошибочные действия" in message or "штраф" in message for message in bad)
+
+
+def test_missed_then_delayed_same_action_counts_once():
+    actions = [
+        {"source": "operator_panel", "accepted": 1, "equipment_id": "pump_H20", "action_type": "TURN_ON"},
+        {"source": "operator_panel", "accepted": 1, "equipment_id": "pump_H1", "action_type": "TURN_OFF"},
+    ]
+    errors = [
+        {"rule_error_type": "MISSED_ACTION", "severity": "CRITICAL",
+         "expected_action": "TURN_ON для pump_H20 до 30.0 с",
+         "cause": "Действие не выполнено до срока."},
+        {"rule_error_type": "DELAYED_ACTION", "severity": "HIGH",
+         "expected_action": "TURN_ON для pump_H20",
+         "cause": "Действие выполнено с задержкой 13.0 с."},
+    ]
+
+    result = practice_criteria(_task(), actions, {}, duration_s=40.0, tracked_errors=errors)
+    _, bad = practice_feedback(result)
+
+    assert result["error_count"] == 1
+    assert result["error_penalty"] == 15.0
+    assert result["criteria"]["safety"]["score"] == 100.0
+    assert not any("не выполнено до срока" in message for message in bad)
+    assert not any("задержкой" in message for message in bad)
+    assert len(result["tracked_errors"]) == 1
+    assert "задержкой" in result["tracked_errors"][0]["cause"]
 
 
 def test_goal_criterion_reflects_target_state_reached():

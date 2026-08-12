@@ -306,6 +306,41 @@ export interface LmsDebrief {
   remarks: string[];
   recommendations: string[];
   competency_delta: CompetencyDelta[];
+  cause_review: CauseReview | null;
+  can_review_as_instructor: boolean;
+}
+
+export interface CausePrediction {
+  cause_id: string;
+  cause: string;
+  confidence: number;
+}
+
+export interface CauseReview {
+  session_id: string;
+  model_name: string;
+  model_status: string;
+  predictions_json: CausePrediction[];
+  operator_answers_json: Record<string, boolean> | null;
+  operator_selected_cause: string | null;
+  operator_reviewed_at: number | null;
+  instructor_id: string | null;
+  instructor_agrees: boolean | null;
+  instructor_causes_json: string[] | null;
+  instructor_reviewed_at: number | null;
+}
+
+export interface InstructorSessionReviewRow {
+  session_id: string;
+  operator_id: string;
+  scenario_id: string;
+  scenario_name: string;
+  wall_end: number | null;
+  performance_score: number | null;
+  model_status: string;
+  operator_reviewed: boolean;
+  instructor_reviewed: boolean;
+  instructor_id: string | null;
 }
 
 export interface LmsGroup {

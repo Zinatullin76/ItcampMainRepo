@@ -154,6 +154,25 @@ CREATE TABLE IF NOT EXISTS ai_classifications (
     created_at       REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS session_cause_reviews (
+    session_id              TEXT PRIMARY KEY REFERENCES sessions(id),
+    feature_schema_version  TEXT NOT NULL,
+    features_json           TEXT NOT NULL,
+    model_name              TEXT NOT NULL,
+    model_status            TEXT NOT NULL,
+    predictions_json        TEXT NOT NULL DEFAULT '[]',
+    inference_latency_ms    REAL,
+    operator_answers_json   TEXT,
+    operator_selected_cause TEXT,
+    operator_reviewed_at    REAL,
+    instructor_id           TEXT,
+    instructor_agrees       INTEGER,
+    instructor_causes_json  TEXT,
+    instructor_reviewed_at  REAL,
+    created_at              REAL NOT NULL,
+    updated_at              REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_actions_session     ON actions (session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_snapshots_session   ON state_snapshots (session_id, sim_time);
 CREATE INDEX IF NOT EXISTS idx_alarms_session      ON alarms (session_id, raised_at);
@@ -161,6 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_errors_session      ON error_events (session_id, 
 CREATE INDEX IF NOT EXISTS idx_errors_pending      ON error_events (ai_status);
 CREATE INDEX IF NOT EXISTS idx_expected_scenario   ON expected_actions (scenario_id);
 CREATE INDEX IF NOT EXISTS idx_ai_session          ON ai_classifications (session_id);
+CREATE INDEX IF NOT EXISTS idx_cause_review_status ON session_cause_reviews (model_status);
 
 CREATE TABLE IF NOT EXISTS alarm_setpoints (
     parameter    TEXT PRIMARY KEY,
@@ -203,6 +223,10 @@ _JSON_COLUMNS = {
     "error_events": set(),
     "expected_actions": {"value"},
     "ai_classifications": {"input_payload"},
+    "session_cause_reviews": {
+        "features_json", "predictions_json", "operator_answers_json",
+        "instructor_causes_json",
+    },
 }
 
 
@@ -477,6 +501,17 @@ class SessionStore:
         ).fetchall()
         return [_decode(dict(r), "state_snapshots") for r in rows]
 
+    def get_first_snapshot(self, session_id: str, reason: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Return one start snapshot without deserializing the whole time series."""
+        sql = "SELECT * FROM state_snapshots WHERE session_id = ?"
+        params: tuple = (session_id,)
+        if reason is not None:
+            sql += " AND reason = ?"
+            params += (reason,)
+        sql += " ORDER BY seq LIMIT 1"
+        row = self._conn.execute(sql, params).fetchone()
+        return _decode(dict(row), "state_snapshots") if row else None
+
     # ------------------------------------------------------------------
     # Alarms
     # ------------------------------------------------------------------
@@ -656,6 +691,55 @@ class SessionStore:
         )
 
     # ------------------------------------------------------------------
+    # Session-level ML predictions and human review
+    # ------------------------------------------------------------------
+
+    def save_cause_prediction(
+        self, session_id: str, features: Dict[str, Any], predictions: List[Dict[str, Any]],
+        model_name: str, model_status: str, latency_ms: Optional[float] = None,
+        feature_schema_version: str = "error-cause-34-v1",
+    ) -> None:
+        now = time.time()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO session_cause_reviews (session_id, feature_schema_version, "
+                "features_json, model_name, model_status, predictions_json, "
+                "inference_latency_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET feature_schema_version=excluded.feature_schema_version, "
+                "features_json=excluded.features_json, model_name=excluded.model_name, "
+                "model_status=excluded.model_status, predictions_json=excluded.predictions_json, "
+                "inference_latency_ms=excluded.inference_latency_ms, updated_at=excluded.updated_at",
+                (session_id, feature_schema_version, _json(features), model_name, model_status,
+                 _json(predictions), latency_ms, now, now),
+            )
+
+    def get_cause_review(self, session_id: str) -> Optional[Dict[str, Any]]:
+        row = self._conn.execute(
+            "SELECT * FROM session_cause_reviews WHERE session_id=?", (session_id,)
+        ).fetchone()
+        return _decode(dict(row), "session_cause_reviews") if row else None
+
+    def save_operator_cause_review(
+        self, session_id: str, answers: Dict[str, bool], selected_cause: str = "",
+    ) -> None:
+        self._touch(
+            "UPDATE session_cause_reviews SET operator_answers_json=?, "
+            "operator_selected_cause=?, operator_reviewed_at=?, updated_at=? WHERE session_id=?",
+            (_json(answers), selected_cause or None, time.time(), time.time(), session_id),
+        )
+
+    def save_instructor_cause_review(
+        self, session_id: str, instructor_id: str, agrees: bool,
+        causes: Optional[List[str]] = None,
+    ) -> None:
+        self._touch(
+            "UPDATE session_cause_reviews SET instructor_id=?, instructor_agrees=?, "
+            "instructor_causes_json=?, instructor_reviewed_at=?, updated_at=? WHERE session_id=?",
+            (instructor_id, 1 if agrees else 0, _json(causes or []),
+             time.time(), time.time(), session_id),
+        )
+
+    # ------------------------------------------------------------------
     # Expected (reference) actions
     # ------------------------------------------------------------------
 
@@ -669,7 +753,7 @@ class SessionStore:
                     "value, deadline_t, description, consequence, weight) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         scenario_id,
-                        ra.get("equipment", ra.get("equipment_id", "")),
+                        ra.get("equipment", ra.get("equipment_id", ra.get("object_id", ""))),
                         ra.get("action", ra.get("action_type", "")),
                         _json(ra.get("value")),
                         ra.get("t", ra.get("deadline_t")),

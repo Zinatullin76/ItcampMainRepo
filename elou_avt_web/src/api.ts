@@ -297,7 +297,19 @@ export const api = {
   lmsCourse: (id: number) => json<LmsCourse>(`/lms/courses/${id}`),
   lmsCompetencies: () => json<import('./types').LmsCompetency[]>('/lms/competencies'),
   lmsHistory: (limit = 200) => json<LmsHistoryRow[]>(`/lms/history?limit=${limit}`),
+  lmsInstructorOperatorHistory: (username: string, limit = 100) =>
+    json<LmsHistoryRow[]>(`/lms/instructor/operators/${encodeURIComponent(username)}/session-history?limit=${limit}`),
+  lmsInstructorSessionReviews: () =>
+    json<import('./types').InstructorSessionReviewRow[]>('/lms/instructor/session-reviews'),
   lmsDebrief: (sessionId: string) => json<LmsDebrief>(`/lms/sessions/${sessionId}/debrief`),
+  saveOperatorCauseReview: (sessionId: string, answers: Record<string, boolean>, selectedCause = '') =>
+    json<{ ok: boolean }>(`/lms/sessions/${sessionId}/cause-review`, {
+      method: 'POST', body: JSON.stringify({ answers, selected_cause: selectedCause }),
+    }),
+  saveInstructorCauseReview: (sessionId: string, agrees: boolean, causes: string[] = []) =>
+    json<{ ok: boolean }>(`/lms/sessions/${sessionId}/instructor-cause-review`, {
+      method: 'POST', body: JSON.stringify({ agrees, causes }),
+    }),
   lmsPracticeTasks: (includeExam = true) =>
     json<LmsPracticeTask[]>(`/lms/practice-tasks?include_exam=${includeExam}`),
   lmsPracticeTask: (id: number) => json<LmsPracticeTask>(`/lms/practice-tasks/${id}`),

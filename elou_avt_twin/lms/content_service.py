@@ -15,8 +15,6 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from auth.store import AuthStore
-from models.base import ErrorEvent, Severity
-
 from . import assessment as assess
 from . import runtime
 from .content_models import (
@@ -40,6 +38,39 @@ from .scenario_service import to_engine_scenario
 from .store import LmsStore
 
 
+def _effective_expected_actions(task: Dict[str, Any], scenario: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One canonical plan: scenario steps enriched with task deadlines.
+
+    The authoring UI stores the semantic plan in ``lms_scenarios`` and may
+    keep timing constraints in ``lms_training_tasks``.  Comparing whole dicts
+    used to duplicate the same three steps into six assessment steps.
+    """
+    task_actions = list(task.get("expected_actions") or [])
+    scenario_actions = list((scenario or {}).get("expected_actions") or [])
+    source = scenario_actions or task_actions
+
+    def key(item: Dict[str, Any]) -> tuple:
+        return (
+            int(item.get("seq") or 0),
+            item.get("object_id") or item.get("equipment_id") or item.get("equipment") or "",
+            str(item.get("action_type") or item.get("action") or "").upper(),
+        )
+
+    task_by_key = {key(item): item for item in task_actions}
+    result: List[Dict[str, Any]] = []
+    for raw in source:
+        item = dict(raw)
+        timing = task_by_key.get(key(item), {})
+        if item.get("deadline_t") is None and timing.get("deadline_t") is not None:
+            item["deadline_t"] = timing["deadline_t"]
+        # Directional actions are satisfied by the sign of the change. Their
+        # optional editor value is not an exact final setpoint.
+        if str(item.get("action_type", "")).upper() in ("INCREASE_PARAM", "DECREASE_PARAM"):
+            item["value"] = None
+        result.append(item)
+    return sorted(result, key=lambda item: int(item.get("seq") or 0))
+
+
 def _assess_context(task: Dict[str, Any], scenario: Optional[Dict[str, Any]],
                     start_snapshot: Optional[Dict[str, Any]] = None) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """Build the evaluation task + initial state for practice assessment.
@@ -50,10 +81,7 @@ def _assess_context(task: Dict[str, Any], scenario: Optional[Dict[str, Any]],
     """
     eval_task = dict(task)
     scn = scenario or {}
-    expected_actions = list(task.get("expected_actions") or [])
-    for exp in (scn.get("expected_actions") or []):
-        if exp not in expected_actions:
-            expected_actions.append(exp)
+    expected_actions = _effective_expected_actions(task, scenario)
     if expected_actions:
         eval_task["expected_actions"] = expected_actions
     task_targets = list(task.get("target_state") or [])
@@ -571,7 +599,19 @@ class ContentService:
 
         # DB-сценарий -> физическое ядро; иначе библиотечный сценарий.
         if scenario is not None:
-            engine_scenario = to_engine_scenario(scenario)
+            reference_actions = _effective_expected_actions(task, scenario)
+            engine_scenario = to_engine_scenario(scenario, reference_actions=[
+                {
+                    "t": a.get("deadline_t"),
+                    "action": a.get("action_type", ""),
+                    "equipment": a.get("object_id", ""),
+                    "attribute": a.get("attribute", ""),
+                    "value": a.get("value"),
+                    "description": a.get("description", ""),
+                    "weight": a.get("weight", 1.0),
+                }
+                for a in reference_actions
+            ])
             twin.create_simulation()
             scheme = runtime.get_scheme()
             if scheme is not None:
@@ -592,7 +632,7 @@ class ContentService:
                 scenario_id=scenario_id,
                 operator_id=username,
                 scheme_version=scheme.id if scheme else "",
-                reference_actions=task.get("expected_actions", []),
+                reference_actions=_effective_expected_actions(task, scenario),
                 sim_start=twin._simulation_time,
                 session_id=session_id,
             )
@@ -918,8 +958,10 @@ class ContentService:
         if session.get("sim_start") is not None and session.get("sim_end") is not None:
             dur = max(0.0, float(session["sim_end"]) - float(session["sim_start"]))
         else:
-            wall = (session.get("wall_end") or _time.time()) - (session.get("wall_start") or 0.0)
-            dur = max(0.0, float(wall))
+            # During assessment the recorder is still active, so sim_end has
+            # not yet been committed. Use current simulation time; wall time
+            # includes UI/network/loading delays and unfairly reduced score.
+            dur = max(0.0, float(runtime.get_twin()._simulation_time) - float(session.get("sim_start") or 0.0))
 
         if task is None:
             result = {"score": 0.0, "criteria": {}, "violations": [],
@@ -930,16 +972,11 @@ class ContentService:
             # ожидаемые действия, критерии и целевые состояния могут жить в
             # сценарии, а запись задания хранит лишь старый срез. Собираем
             # полный контекст, не изменяя данные в БД.
-            snapshots = session_store.get_snapshots(session_id) if session_store else []
-            start_snapshot = None
-            if snapshots:
-                # Первый «step»-снапшот отражает реальное стартовое состояние:
-                # в предшаговом снапшоте reason="start" положения клапанов ещё
-                # не инициализированы (нули), а оператор видит уже применённые
-                # значения оборудования.
-                start_snapshot = next(
-                    (s for s in snapshots if s.get("reason") == "step"), snapshots[0]
-                )
+            # Нужен один стартовый снимок, а не полная (иногда очень большая)
+            # временная серия. Это существенно сокращает время завершения.
+            start_snapshot = session_store.get_first_snapshot(session_id, "step") if session_store else None
+            if start_snapshot is None and session_store:
+                start_snapshot = session_store.get_first_snapshot(session_id)
             eval_task, initial_state = _assess_context(task, scenario, start_snapshot)
 
             result = assess.practice_criteria(
@@ -950,30 +987,12 @@ class ContentService:
             good, bad = assess.practice_feedback(result)
             result["feedback_good"] = good
             result["feedback_bad"] = bad
-            # Аргументация ошибок автооценки сохраняется в error_events сессии
-            # (тип PRACTICE_FEEDBACK), чтобы попадать в разбор выполнения вместе
-            # с остальными событиями. В очередь AI-классификации не идут.
-            if bad and session_store is not None:
-                sim_time = float(session.get("sim_end") or runtime.get_twin()._simulation_time or 0.0)
-                for msg in bad:
-                    session_store.append_error(
-                        session_id,
-                        ErrorEvent(
-                            error_type="PRACTICE_FEEDBACK",
-                            severity=Severity.MEDIUM,
-                            timestamp=sim_time,
-                            operator_action="",
-                            expected_action="",
-                            cause=msg,
-                            consequence="",
-                        ),
-                        ai_status="classified",
-                    )
 
         # Журнал действий оператора («Обуч.txt» §12).
         user_id = self._user_id(operator) or 0
+        action_log_rows = []
         for a in actions:
-            self.store.add_action_log({
+            action_log_rows.append({
                 "timestamp": float(a.get("wall_time") or _time.time()),
                 "user_id": user_id,
                 "username": operator,
@@ -986,13 +1005,14 @@ class ContentService:
                 "session_id": session_id,
                 "module_id": module_id or None,
             })
+        self.store.add_action_logs(action_log_rows)
 
         score = result.get("score", 0.0)
         errors_count = int(result.get("error_count", 0))
         critical_count = sum(1 for v in result.get("violations", [])
                              if str(v.get("severity", "")).upper() == "CRITICAL")
         critical_count += sum(
-            1 for error in tracked_errors
+            1 for error in result.get("tracked_errors", [])
             if str(error.get("severity", "")).upper() == "CRITICAL"
         )
         passed = score >= 70.0
@@ -1020,7 +1040,24 @@ class ContentService:
         # не попадали в завершённую практику.
         recorder = runtime.get_session_recorder()
         if recorder is not None and recorder.active and recorder.session_id == session_id:
+            # Зафиксировать ошибки, появившиеся на последнем simulation tick,
+            # до отсоединения рекордера.
+            twin = runtime.get_twin()
+            twin._engine._error_tracker.check_missed_actions(twin._simulation_time)
+            recorder.sync_errors(twin._engine.get_events())
             recorder.end(sim_end=runtime.get_twin()._simulation_time, score=score)
+        # Инференс выполняется после COMMIT завершения: 34 признака видят
+        # корректные sim_end/wall_end. Модель загружается лениво и кешируется.
+        from ml.error_cause_inference import FEATURE_SCHEMA_VERSION, MODEL, build_features
+        features = build_features(session_store, session_id)
+        if passed:
+            predictions, model_status, latency_ms = [], "not_applicable_success", 0.0
+        else:
+            predictions, model_status, latency_ms = MODEL.predict(features)
+        session_store.save_cause_prediction(
+            session_id, features, predictions, MODEL.name, model_status, latency_ms,
+            FEATURE_SCHEMA_VERSION,
+        )
         self._ready_sessions.discard(session_id)
 
         return self._assessment_view(aid)

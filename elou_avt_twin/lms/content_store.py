@@ -853,6 +853,26 @@ class LmsContentStore:
             self._conn.commit()
             return int(cur.lastrowid)
 
+    def add_action_logs(self, entries: List[Dict[str, Any]]) -> int:
+        """Insert a complete session log in one transaction."""
+        if not entries:
+            return 0
+        rows = [(
+            entry.get("timestamp", time.time()), entry.get("user_id"),
+            entry.get("username", ""), entry.get("object_id", ""),
+            entry.get("object_name", ""), entry.get("action", ""),
+            _json(entry.get("old_state")) or "{}", _json(entry.get("new_state")) or "{}",
+            entry.get("source", "operator_panel"), entry.get("session_id"),
+            entry.get("module_id"),
+        ) for entry in entries]
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO lms_action_log (timestamp, user_id, username, object_id, object_name, "
+                "action, old_state, new_state, source, session_id, module_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows,
+            )
+        return len(rows)
+
     def list_action_log(self, username: Optional[str] = None,
                         object_id: Optional[str] = None, session_id: Optional[str] = None,
                         limit: int = 500) -> List[Dict[str, Any]]:

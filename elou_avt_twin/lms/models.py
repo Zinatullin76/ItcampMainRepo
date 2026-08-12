@@ -276,6 +276,8 @@ class DebriefView(BaseModel):
     remarks: List[str] = Field(default_factory=list)
     recommendations: List[str] = Field(default_factory=list)
     competency_delta: List[Dict[str, Any]] = Field(default_factory=list)
+    cause_review: Optional[Dict[str, Any]] = None
+    can_review_as_instructor: bool = False
 
 
 class GroupMemberProgress(BaseModel):

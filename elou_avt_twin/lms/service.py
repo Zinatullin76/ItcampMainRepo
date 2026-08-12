@@ -404,6 +404,19 @@ class LmsService:
                 timestamp=relative_time(e.get("sim_time")),
             ))
 
+        # PRACTICE_FEEDBACK is assessment prose, not an operator error. Old
+        # databases may still contain such rows; never expose/count them as
+        # ErrorTracker events. If a missed deadline was later completed, keep
+        # only the final DELAYED_ACTION explanation.
+        tracker_errors = [e for e in error_views if e.rule_error_type != "PRACTICE_FEEDBACK"]
+        delayed_expected = [e.expected_action.strip() for e in tracker_errors
+                            if e.rule_error_type == "DELAYED_ACTION"]
+        tracker_errors = [e for e in tracker_errors if not (
+            e.rule_error_type == "MISSED_ACTION"
+            and any(e.expected_action.strip().startswith(delayed)
+                    for delayed in delayed_expected if delayed)
+        )]
+
         alarm_views: List[Dict[str, Any]] = []
         for alarm in alarms:
             item = dict(alarm)
@@ -417,12 +430,6 @@ class LmsService:
             dur = max(0.0, float(session["sim_end"]) - float(session["sim_start"]))
 
         recommendations: List[str] = []
-        rule_errors = [e for e in error_views if e.rule_error_type != "PRACTICE_FEEDBACK"]
-        if rule_errors:
-            for e in rule_errors[:3]:
-                if e.cause:
-                    recommendations.append(f"Ошибка «{e.rule_error_type}»: {e.cause}. "
-                                           f"Ожидалось: {e.expected_action or '—'}.")
         score = float(session.get("performance_score") or 0.0)
         if score < 70:
             recommendations.append("Рекомендуется повторить практику и изучить теоретический материал "
@@ -436,21 +443,19 @@ class LmsService:
 
         competency_delta = self._debrief_competency_delta(session_id, username, score)
 
-        # Замечания автооценки: почему не набраны максимальные баллы (не
-        # достигнута цель, нарушены ожидаемые действия и т.п.). Для новых
-        # практик они уже сохранены в error_events (PRACTICE_FEEDBACK),
-        # поэтому дубли не показываем — старые сессии догружаются из оценки.
+        # The error block has one authoritative source: ErrorTracker.  Result
+        # summaries such as “goal 0%” and “expected actions 33%” belong to
+        # criteria, not to individual operator errors, and must not inflate
+        # the visible error count.
         remarks: List[str] = []
-        if self.content is not None:
-            assessment = self.content.get_assessment_by_session(session_id)
-            if assessment:
-                in_errors = {
-                    e.get("cause")
-                    for e in errors
-                    if e.get("rule_error_type") == "PRACTICE_FEEDBACK" and e.get("cause")
-                }
-                remarks = [m for m in (assessment.get("feedback_bad") or []) if m not in in_errors]
 
+        cause_review = self.sessions.get_cause_review(session_id)
+        if cause_review:
+            # Feature vectors are intentionally retained in the database for
+            # retraining, but are not sent to the browser.
+            cause_review.pop("features_json", None)
+            if cause_review.get("instructor_agrees") is not None:
+                cause_review["instructor_agrees"] = bool(cause_review["instructor_agrees"])
         return DebriefView(
             session_id=session_id,
             task_title=self._task_title(session.get("scenario_id", "")),
@@ -464,10 +469,14 @@ class LmsService:
             sim_end=relative_time(session.get("sim_end")),
             steps=steps,
             alarms=alarm_views,
-            errors=error_views,
+            # ErrorTracker events are hidden from reports; they remain in
+            # error_events and in the 34-feature inference vector.
+            errors=tracker_errors,
             remarks=remarks,
             recommendations=recommendations,
             competency_delta=competency_delta,
+            cause_review=cause_review,
+            can_review_as_instructor="view_analytics" in (self.auth.permissions_for_user(username) or []),
         )
 
     def _debrief_competency_delta(self, session_id: str, username: str, score: float) -> List[Dict[str, Any]]:

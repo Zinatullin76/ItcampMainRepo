@@ -72,6 +72,16 @@ from .store import LmsStore
 
 router = APIRouter(prefix="/lms", tags=["lms"])
 
+
+class OperatorCauseReviewWrite(BaseModel):
+    answers: Dict[str, bool]
+    selected_cause: str = ""
+
+
+class InstructorCauseReviewWrite(BaseModel):
+    agrees: bool
+    causes: List[str] = []
+
 _service: Optional[LmsService] = None
 
 
@@ -168,6 +178,82 @@ def session_debrief(session_id: str,
     if view is None:
         raise HTTPException(status_code=404, detail=f"Сессия '{session_id}' не найдена")
     return view
+
+
+@router.post("/sessions/{session_id}/cause-review",
+             dependencies=[Depends(require_permission("view_history"))])
+def operator_cause_review(session_id: str, req: OperatorCauseReviewWrite,
+                          current_user: Principal = Depends(get_current_user)):
+    service = get_service()
+    session = service.sessions.get_session(session_id)
+    review = service.sessions.get_cause_review(session_id)
+    if session is None or review is None:
+        raise HTTPException(status_code=404, detail="Прогноз для сессии не найден")
+    participants = session.get("participants") or []
+    if session.get("operator_id") != current_user.username and current_user.username not in participants:
+        raise HTTPException(status_code=403, detail="Разметить прогноз может только оператор сессии")
+    prediction_ids = {p.get("cause_id") for p in review.get("predictions_json") or []}
+    if set(req.answers) != prediction_ids:
+        raise HTTPException(status_code=422, detail="Нужен ответ по каждой предложенной причине")
+    if req.answers and not any(req.answers.values()) and not req.selected_cause.strip():
+        raise HTTPException(status_code=422, detail="Укажите достоверную причину")
+    from ml.error_cause_inference import CAUSE_LABELS
+    allowed_causes = set(CAUSE_LABELS.values())
+    if req.selected_cause.strip() and req.selected_cause.strip() not in allowed_causes:
+        raise HTTPException(status_code=422, detail="Неизвестная причина")
+    service.sessions.save_operator_cause_review(session_id, req.answers, req.selected_cause.strip())
+    return {"ok": True}
+
+
+@router.post("/sessions/{session_id}/instructor-cause-review",
+             dependencies=[Depends(require_permission("view_analytics"))])
+def instructor_cause_review(session_id: str, req: InstructorCauseReviewWrite,
+                            current_user: Principal = Depends(get_current_user)):
+    service = get_service()
+    if service.sessions.get_cause_review(session_id) is None:
+        raise HTTPException(status_code=404, detail="Прогноз для сессии не найден")
+    causes = [cause.strip() for cause in req.causes if cause.strip()]
+    from ml.error_cause_inference import CAUSE_LABELS
+    if any(cause not in set(CAUSE_LABELS.values()) for cause in causes):
+        raise HTTPException(status_code=422, detail="Неизвестная причина")
+    if not req.agrees and not causes:
+        raise HTTPException(status_code=422, detail="Выберите хотя бы одну достоверную причину")
+    service.sessions.save_instructor_cause_review(
+        session_id, current_user.username, req.agrees, causes,
+    )
+    return {"ok": True}
+
+
+@router.get("/instructor/operators/{username}/session-history", response_model=List[HistoryRow],
+            dependencies=[Depends(require_permission("view_analytics"))])
+def instructor_operator_session_history(username: str, limit: int = Query(100, ge=1, le=500)):
+    """Completed session history used by the instructor review workflow."""
+    return get_service()._history_rows(username, limit=limit)
+
+
+@router.get("/instructor/session-reviews",
+            dependencies=[Depends(require_permission("view_analytics"))])
+def instructor_session_reviews(limit: int = Query(500, ge=1, le=1000)):
+    """All completed operator sessions with ML/human review status."""
+    service = get_service()
+    rows = []
+    for session in service.sessions.list_sessions(limit=limit):
+        if session.get("status") != "COMPLETED":
+            continue
+        review = service.sessions.get_cause_review(session["id"])
+        rows.append({
+            "session_id": session["id"],
+            "operator_id": session.get("operator_id", ""),
+            "scenario_id": session.get("scenario_id", ""),
+            "scenario_name": service._scenario_name(session.get("scenario_id", "")),
+            "wall_end": session.get("wall_end"),
+            "performance_score": session.get("performance_score"),
+            "model_status": review.get("model_status") if review else "missing",
+            "operator_reviewed": bool(review and review.get("operator_reviewed_at")),
+            "instructor_reviewed": bool(review and review.get("instructor_reviewed_at")),
+            "instructor_id": review.get("instructor_id") if review else None,
+        })
+    return rows
 
 
 @router.get("/practice-tasks", response_model=List[PracticeTask],

@@ -2719,6 +2719,11 @@ html[data-theme='light'] .badge-accent { background: rgba(2, 132, 199, 0.08); }
 .hero-row { display: flex; gap: 18px; flex-wrap: wrap; align-items: stretch; }
 .hero-main { flex: 1; min-width: 320px; display: flex; flex-direction: column; gap: 16px; }
 .hero-side { flex: 0 0 300px; display: flex; flex-direction: column; gap: 16px; }
+.cause-review, .instructor-review { display: flex; flex-direction: column; gap: 12px; }
+.cause-prediction { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.cause-question { margin: 8px 0 6px; font-size: 12px; }
+.cause-select-label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+.cause-check { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; }
 
 .stack { display: flex; flex-direction: column; gap: 16px; }
 

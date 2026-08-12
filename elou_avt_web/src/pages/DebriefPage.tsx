@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
+import { useAuth } from '../auth';
 import type { LmsDebrief } from '../types';
 import {
   Card,
@@ -31,6 +33,14 @@ const SEVERITY_LABELS: Record<string, string> = {
   CRITICAL: 'критический',
 };
 
+const CAUSES = [
+  'Потеря ориентации в установке',
+  'Долгое время реакции',
+  'Непонимание физических процессов',
+  'Незнание алгоритма или регламента',
+  'Случайная ошибка',
+];
+
 function qualTone(q: string): 'q-ok' | 'q-warn' | 'q-bad' {
   if (q.includes('ОТЛИЧНО')) return 'q-ok';
   if (q.includes('НЕ СДАНО')) return 'q-bad';
@@ -40,6 +50,13 @@ function qualTone(q: string): 'q-ok' | 'q-warn' | 'q-bad' {
 export default function DebriefPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [answers, setAnswers] = useState<Record<string, boolean>>({});
+  const [selectedCause, setSelectedCause] = useState('');
+  const [instructorAgrees, setInstructorAgrees] = useState<boolean | null>(null);
+  const [instructorCauses, setInstructorCauses] = useState<string[]>([]);
+  const [savingReview, setSavingReview] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState('');
   const { data, error, loading } = useAsync<LmsDebrief>(
     () => (sessionId ? api.lmsDebrief(sessionId) : Promise.reject(new Error('Нет сессии'))),
     [sessionId],
@@ -50,6 +67,31 @@ export default function DebriefPage() {
   if (!data) return <Empty />;
 
   const d = data;
+  const review = d.cause_review;
+  const predictions = review?.predictions_json ?? [];
+  const isInstructor = d.can_review_as_instructor;
+  const allOperatorAnswered = predictions.length > 0 && predictions.every((p) => p.cause_id in answers);
+  const allRejected = allOperatorAnswered && predictions.every((p) => answers[p.cause_id] === false);
+
+  const saveOperatorReview = async () => {
+    if (!sessionId || !allOperatorAnswered || (allRejected && !selectedCause)) return;
+    setSavingReview(true); setReviewMessage('');
+    try {
+      await api.saveOperatorCauseReview(sessionId, answers, selectedCause);
+      setReviewMessage('Ваша оценка сохранена');
+    } catch (e) { setReviewMessage(e instanceof Error ? e.message : String(e)); }
+    finally { setSavingReview(false); }
+  };
+
+  const saveInstructorReview = async () => {
+    if (!sessionId || instructorAgrees == null || (!instructorAgrees && instructorCauses.length === 0)) return;
+    setSavingReview(true); setReviewMessage('');
+    try {
+      await api.saveInstructorCauseReview(sessionId, instructorAgrees, instructorCauses);
+      setReviewMessage('Разметка инструктора сохранена');
+    } catch (e) { setReviewMessage(e instanceof Error ? e.message : String(e)); }
+    finally { setSavingReview(false); }
+  };
 
   return (
     <Page
@@ -151,6 +193,63 @@ export default function DebriefPage() {
         </div>
 
         <div className="hero-side">
+          {review && predictions.length > 0 && (
+            <Card title="Возможные причины неудачного прохождения">
+              <div className="cause-review">
+                {predictions.map((p, index) => (
+                  <div className="cause-prediction" key={p.cause_id}>
+                    <div className="bold">{index + 1}. {p.cause}</div>
+                    <div className="muted">Уверенность модели: {(p.confidence * 100).toFixed(1)}%</div>
+                    <div className="cause-question">Согласны ли вы с этой причиной?</div>
+                    {!isInstructor ? (
+                      <div className="row">
+                        <button className={`btn btn-small ${answers[p.cause_id] === true ? 'btn-start' : ''}`}
+                          onClick={() => setAnswers((old) => ({ ...old, [p.cause_id]: true }))}>Да</button>
+                        <button className={`btn btn-small ${answers[p.cause_id] === false ? 'btn-stop' : ''}`}
+                          onClick={() => setAnswers((old) => ({ ...old, [p.cause_id]: false }))}>Нет</button>
+                      </div>
+                    ) : <div className="muted">Ответ оператора: {review.operator_answers_json?.[p.cause_id] == null ? 'нет разметки' : review.operator_answers_json[p.cause_id] ? 'да' : 'нет'}</div>}
+                  </div>
+                ))}
+
+                {!isInstructor && allRejected && (
+                  <label className="cause-select-label">
+                    Укажите причину неудачи, которую вы считаете достоверной.
+                    <select className="scenario-select full" value={selectedCause} onChange={(e) => setSelectedCause(e.target.value)}>
+                      <option value="">Выберите причину</option>
+                      {CAUSES.map((cause) => <option key={cause} value={cause}>{cause}</option>)}
+                    </select>
+                  </label>
+                )}
+                {!isInstructor && (
+                  <button className="btn btn-start" disabled={savingReview || !allOperatorAnswered || (allRejected && !selectedCause)} onClick={() => void saveOperatorReview()}>
+                    Сохранить оценку
+                  </button>
+                )}
+
+                {isInstructor && (
+                  <div className="instructor-review">
+                    <div className="muted">Выбор оператора: {review.operator_selected_cause || 'отдельная причина не выбрана'}</div>
+                    <div className="cause-question">Вы согласны с итоговой разметкой?</div>
+                    <div className="row">
+                      <button className={`btn btn-small ${instructorAgrees === true ? 'btn-start' : ''}`} onClick={() => setInstructorAgrees(true)}>Да</button>
+                      <button className={`btn btn-small ${instructorAgrees === false ? 'btn-stop' : ''}`} onClick={() => setInstructorAgrees(false)}>Нет</button>
+                    </div>
+                    {instructorAgrees === false && CAUSES.map((cause) => (
+                      <label className="cause-check" key={cause}>
+                        <input type="checkbox" checked={instructorCauses.includes(cause)} onChange={(e) => setInstructorCauses((old) => e.target.checked ? [...old, cause] : old.filter((x) => x !== cause))} />
+                        {cause}
+                      </label>
+                    ))}
+                    <button className="btn btn-start" disabled={savingReview || instructorAgrees == null || (instructorAgrees === false && instructorCauses.length === 0)} onClick={() => void saveInstructorReview()}>
+                      Сохранить разметку инструктора
+                    </button>
+                  </div>
+                )}
+                {reviewMessage && <div className="muted">{reviewMessage}</div>}
+              </div>
+            </Card>
+          )}
           <Card title="Рекомендации">
             {d.recommendations.length === 0 ? (
               <Empty text="Рекомендаций нет" />

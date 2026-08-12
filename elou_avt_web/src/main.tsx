@@ -23,6 +23,7 @@ const InstructorCoursesPage = React.lazy(() => import('./pages/instructor/Course
 const InstructorTasksPage = React.lazy(() => import('./pages/instructor/TasksPage'));
 const MonitoringPage = React.lazy(() => import('./pages/instructor/MonitoringPage'));
 const AnalyticsPage = React.lazy(() => import('./pages/instructor/AnalyticsPage'));
+const SessionReviewsPage = React.lazy(() => import('./pages/instructor/SessionReviewsPage'));
 const ModuleConstructorPage = React.lazy(() => import('./pages/instructor/ModuleConstructorPage'));
 const AdminUsersPage = React.lazy(() => import('./pages/admin/UsersPage'));
 const RolesPage = React.lazy(() => import('./pages/admin/RolesPage'));
@@ -74,6 +75,7 @@ const INSTRUCTOR_NAV: NavItem[] = [
   { to: '/instructor/courses', label: 'Курсы · конструктор', ico: '▤' },
   { to: '/instructor/tasks', label: 'Практические задания', ico: '▣' },
   { to: '/instructor/monitoring', label: 'Мониторинг', ico: '◉' },
+  { to: '/instructor/session-reviews', label: 'Оценка сессий', ico: '✓' },
   { to: '/instructor/analytics', label: 'Аналитика', ico: '◔' },
 ];
 
@@ -241,6 +243,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
               <Route path="/instructor/tasks" element={<RequirePermission permissions={['view_group_progress', 'manage_practice_tasks']}><InstructorTasksPage /></RequirePermission>} />
               <Route path="/instructor/monitoring" element={<RequirePermission permissions={['monitor_operators']}><MonitoringPage /></RequirePermission>} />
               <Route path="/instructor/analytics" element={<RequirePermission permissions={['view_analytics']}><AnalyticsPage /></RequirePermission>} />
+              <Route path="/instructor/session-reviews" element={<RequirePermission permissions={['view_analytics']}><SessionReviewsPage /></RequirePermission>} />
               <Route path="/instructor/modules/:moduleId" element={<RequirePermission permissions={['manage_courses']}><ModuleConstructorPage /></RequirePermission>} />
               <Route path="/instructor/courses" element={<RequirePermission permissions={['manage_courses', 'view_courses']}><InstructorCoursesPage /></RequirePermission>} />
 

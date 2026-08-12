@@ -1501,9 +1501,20 @@ def _stop_simulation_thread() -> None:
             lms_runtime.configure(twin, scheme_store, None, None, inputs)
 
 
+def _preload_error_cause_model() -> None:
+    """Pay sklearn/joblib import cost in the background, not on Finish click."""
+    try:
+        from ml.error_cause_inference import MODEL
+        MODEL._load()
+        logger.info("Error-cause model preloaded: %s", MODEL.name)
+    except Exception:
+        logger.exception("Error-cause model preload failed")
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _start_simulation_thread()
+    threading.Thread(target=_preload_error_cause_model, name="ml-preload", daemon=True).start()
     try:
         yield
     finally:

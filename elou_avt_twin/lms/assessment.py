@@ -560,8 +560,25 @@ def practice_criteria(task: Dict[str, Any], actions: List[Dict[str, Any]],
     ]
     rejected = [a for a in actions if a.get("source") == "operator_panel" and not a.get("accepted", 1)]
     tracked_errors = tracked_errors or []
-    penalty_breakdown: List[Dict[str, Any]] = []
+    # A missed deadline may first be emitted as MISSED_ACTION and later, when
+    # the operator performs the same step, as DELAYED_ACTION. These are two
+    # lifecycle states of one violation, not two operator errors. Keep the
+    # final, more informative DELAYED_ACTION for scoring and feedback.
+    delayed_expected = [
+        str(error.get("expected_action") or "").strip()
+        for error in tracked_errors
+        if error.get("rule_error_type") == "DELAYED_ACTION"
+    ]
+    effective_tracked_errors = []
     for error in tracked_errors:
+        expected_text = str(error.get("expected_action") or "").strip()
+        if error.get("rule_error_type") == "MISSED_ACTION" and any(
+            delayed and expected_text.startswith(delayed) for delayed in delayed_expected
+        ):
+            continue
+        effective_tracked_errors.append(error)
+    penalty_breakdown: List[Dict[str, Any]] = []
+    for error in effective_tracked_errors:
         penalty_breakdown.append({
             "source": "error_tracker",
             "code": error.get("rule_error_type", ""),
@@ -591,7 +608,7 @@ def practice_criteria(task: Dict[str, Any], actions: List[Dict[str, Any]],
     safety = 1.0
     for cv in critical_violations:
         safety -= 0.5
-    for error in tracked_errors:
+    for error in effective_tracked_errors:
         if str(error.get("severity", "")).upper() == "CRITICAL":
             safety -= 0.5
     safety = max(0.0, safety)
@@ -644,7 +661,7 @@ def practice_criteria(task: Dict[str, Any], actions: List[Dict[str, Any]],
         "criteria": out,
         "score": round(score, 1),
         "violations": violations,
-        "tracked_errors": tracked_errors,
+        "tracked_errors": effective_tracked_errors,
         "error_count": len(penalty_breakdown),
         "error_penalty": round(error_penalty, 1),
         "expected_count": expected_count,
@@ -689,6 +706,10 @@ def practice_feedback(result: Dict[str, Any]) -> tuple[List[str], List[str]]:
     criteria = result.get("criteria", {})
     for key, val in criteria.items():
         s = _num(val.get("score"))
+        # This is a technical aggregate. Operators need concrete violations
+        # below (for example, the exact delay), not “Ошибочные действия — 0%”.
+        if key == "errors":
+            continue
         if s >= 80:
             good.append(f"{val.get('title')} — {s:.0f}%")
         elif s < 60:
@@ -701,15 +722,6 @@ def practice_feedback(result: Dict[str, Any]) -> tuple[List[str], List[str]]:
     for v in result.get("violations", []):
         msg = v.get("rule_message") or f"Запрещённое действие {v.get('action_type')} на {v.get('object_id')}"
         bad.append(msg)
-    for error in result.get("tracked_errors", []):
-        if error.get("cause"):
-            bad.append(str(error["cause"]))
-    penalty = _num(result.get("error_penalty"))
-    if penalty > 0:
-        bad.append(
-            f"Учтено ошибок: {int(result.get('error_count', 0))}; "
-            f"штраф по критерию «Ошибочные действия»: −{penalty:.0f} баллов."
-        )
     expected_count = int(result.get("expected_count", 0))
     completed_expected = int(result.get("completed_expected", 0))
     if completed_expected < expected_count:
