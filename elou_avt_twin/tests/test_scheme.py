@@ -8,7 +8,7 @@ import pytest
 
 from scheme.model import (
     ProcessScheme, SchemeNode, SchemeEdge, SCHEMA_VERSION,
-    load_scheme, save_scheme, migrate_scheme_data,
+    load_scheme, save_scheme, migrate_scheme_data, normalize_duplicate_ids,
 )
 
 
@@ -24,7 +24,7 @@ def _scheme():
 
 
 def test_schema_version():
-    assert SCHEMA_VERSION == "1.1"
+    assert SCHEMA_VERSION == "1.2"
 
 
 def test_default_scheme_loads():
@@ -98,3 +98,29 @@ def test_migration_preserves_unknown_keys():
     }
     out = migrate_scheme_data(data)
     assert out["nodes"][0]["params"]["custom_flag"] is True
+
+
+def test_duplicate_id_migration_preserves_all_objects_and_edges():
+    data = {
+        "schema_version": "1.1",
+        "nodes": [
+            {"id": "pump", "type": "pump", "name": "Рабочий"},
+            {"id": "pump", "type": "pump", "name": "Сохранённая копия"},
+            {"id": "pump__dup2", "type": "pump", "name": "Уже существующий ID"},
+        ],
+        "edges": [
+            {"id": "edge", "source": "pump", "target": "pump"},
+            {"id": "edge", "source": "pump", "target": "pump"},
+        ],
+    }
+    out = normalize_duplicate_ids(data)
+    assert len(out["nodes"]) == 3
+    assert len(out["edges"]) == 2
+    assert [node["id"] for node in out["nodes"]] == [
+        "pump", "pump__dup3", "pump__dup2",
+    ]
+    assert [edge["id"] for edge in out["edges"]] == ["edge", "edge__dup2"]
+    # Existing ambiguous links stay attached to the original object; migration
+    # never guesses and never silently rewires a process.
+    assert out["edges"][1]["source"] == "pump"
+    assert out["edges"][1]["target"] == "pump"

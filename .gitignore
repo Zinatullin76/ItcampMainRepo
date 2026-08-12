@@ -24,6 +24,8 @@ elou_avt_twin/sessions.db-shm
 opencode1.json
 *.env
 .env
+.auth_secret
+elou_avt_twin/.auth_secret
 config/local_config.json
 
 # ---- Frontend (elou_avt_web) ----

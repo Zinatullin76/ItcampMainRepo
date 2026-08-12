@@ -78,16 +78,19 @@ export default function LoginPage() {
         <div className="login-sub" style={{ marginTop: 4 }}>Демо-доступ (пароль = логин):</div>
         <div className="login-quick">
           {DEMO.map((d) => (
-            <span
+            <button
+              type="button"
               key={d.username}
               className={`picker-chip${username === d.username ? ' on' : ''}`}
+              disabled={busy}
               onClick={() => {
                 setUsername(d.username);
                 setPassword(d.username);
+                void doLogin(d.username, d.username);
               }}
             >
               {d.label}
-            </span>
+            </button>
           ))}
         </div>
       </form>

@@ -1939,7 +1939,7 @@
       "y": -722.0
     },
     {
-      "id": "pum_8",
+      "id": "pum_8__dup2",
       "name": "Н1-Б",
       "params": {
         "efficiency_nominal": 0.75,
@@ -1999,7 +1999,7 @@
       "y": -723.0
     },
     {
-      "id": "source_13",
+      "id": "source_13__dup2",
       "name": "ц.о. К-2",
       "params": {
         "flow_kg_s": 19,
@@ -6048,7 +6048,7 @@
       "y": -104.0
     },
     {
-      "id": "spl_9",
+      "id": "spl_9__dup2",
       "name": "Разъединитель потока",
       "params": {
         "num_outputs": 2
@@ -6058,7 +6058,7 @@
       "y": 999.0
     },
     {
-      "id": "spl_10",
+      "id": "spl_10__dup2",
       "name": "Разъединитель потока",
       "params": {
         "num_outputs": 2
@@ -6080,7 +6080,7 @@
       "y": -5.0
     },
     {
-      "id": "spl_13",
+      "id": "spl_13__dup2",
       "name": "Разъединитель потока",
       "params": {
         "num_outputs": 2
@@ -6090,7 +6090,7 @@
       "y": -108.0
     },
     {
-      "id": "spl_15",
+      "id": "spl_15__dup2",
       "name": "Разъединитель потока",
       "params": {
         "num_outputs": 2
@@ -6100,7 +6100,7 @@
       "y": 667.0
     },
     {
-      "id": "spl_16",
+      "id": "spl_16__dup2",
       "name": "Разъединитель потока",
       "params": {
         "num_outputs": 2
@@ -6110,7 +6110,7 @@
       "y": 823.0
     },
     {
-      "id": "spl_17",
+      "id": "spl_17__dup2",
       "name": "Разъединитель потока",
       "params": {
         "num_outputs": 2
@@ -6156,5 +6156,5 @@
       "y": 290.0
     }
   ],
-  "schema_version": "1.1"
+  "schema_version": "1.2"
 }

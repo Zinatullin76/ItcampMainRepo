@@ -16,6 +16,11 @@ export default function FieldOperatorScreen() {
     (r) => r === 'operator' || r === 'field_operator',
   );
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  // Keep iframe URL stable: theme changes are delivered with postMessage and
+  // must not rebuild the expensive 3D scene from scratch.
+  const [frameSrc] = useState(() => `/avt4_3d_model_v7.html?theme=${theme}`);
+  const [modelLoading, setModelLoading] = useState(true);
+  const [modelError, setModelError] = useState('');
   const [ctx, setCtx] = useState<FieldErrorsResponse>({
     active: false,
     session_id: null,
@@ -57,10 +62,6 @@ export default function FieldOperatorScreen() {
     return () => window.clearInterval(t);
   }, [inPractice, ctx.status, ctx.session_id]);
 
-  // Theme is passed both in the URL (correct initial load) and via postMessage
-  // (live switching without reloading the 3D scene).
-  const src = `/avt4_3d_model_v7.html?theme=${theme}`;
-
   const syncTheme = useCallback(() => {
     const frame = frameRef.current;
     if (frame && frame.contentWindow) {
@@ -88,8 +89,14 @@ export default function FieldOperatorScreen() {
 
   useEffect(() => {
     const onMessage = async (e: MessageEvent) => {
-      if (!e.data) return;
-      if (e.data.type === 'elou-pick') {
+      if (!e.data || e.source !== frameRef.current?.contentWindow) return;
+      if (e.data.type === 'elou-model-ready') {
+        setModelLoading(false);
+        setModelError('');
+      } else if (e.data.type === 'elou-model-error') {
+        setModelLoading(false);
+        setModelError('Не удалось подготовить 3D-модель. Обновите экран или проверьте поддержку WebGL.');
+      } else if (e.data.type === 'elou-pick') {
         api.logScadaEvent({
           event_type: 'click',
           object_id: e.data.tag ?? '',
@@ -128,6 +135,7 @@ export default function FieldOperatorScreen() {
   useEffect(() => {
     let alive = true;
     const poll = async () => {
+      if (document.hidden) return;
       try {
         const res = await api.lmsFieldErrors();
         if (alive) setCtx(res);
@@ -185,14 +193,37 @@ export default function FieldOperatorScreen() {
     <div className={`field-operator-screen${inPractice ? ' fullscreen' : ''}`}>
       <iframe
         ref={frameRef}
-        src={src}
+        src={frameSrc}
         onLoad={() => {
           syncTheme();
           syncErrors();
         }}
         title="Экран полевого оператора — 3D-модель установки"
         className="field-operator-frame"
+        loading="eager"
+        referrerPolicy="no-referrer"
+        sandbox="allow-scripts"
       />
+      {modelLoading && (
+        <div className="field-model-loading" role="status" aria-live="polite">
+          <span className="field-model-spinner" aria-hidden="true" />
+          <strong>Загрузка 3D-модели установки…</strong>
+          <span>Подготавливаем оборудование и трубопроводы</span>
+        </div>
+      )}
+      {modelError && (
+        <div className="field-model-error" role="alert">
+          <strong>3D-модель недоступна</strong>
+          <span>{modelError}</span>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => window.location.reload()}
+          >
+            Повторить
+          </button>
+        </div>
+      )}
       {inPractice ? (
         <div className="field-practice-bar">
           <span className="field-practice-title">{ctx.title || 'Практика'}</span>

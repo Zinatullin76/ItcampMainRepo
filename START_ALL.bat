@@ -20,7 +20,7 @@ echo [2/3] Installing frontend dependencies...
 if exist "elou_avt_web\package.json" (
   pushd elou_avt_web
   if not exist "node_modules" (
-    call npm install
+    call npm ci
     if errorlevel 1 (
       echo ERROR: npm install failed. Is Node.js installed?
       popd

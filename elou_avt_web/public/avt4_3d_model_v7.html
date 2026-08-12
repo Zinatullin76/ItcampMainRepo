@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ЭЛОУ-АВТ-4 — 3D-модель: аппараты, насосы, трубопроводы</title>
 <style>
-  :root{--bg:#0d1117;--line:#22303f;--txt:#d7e0e8;--dim:#7d8f9f;--lbl-bg:rgba(9,13,18,.78);
+  :root{--bg:#fff;--line:#22303f;--txt:#d7e0e8;--dim:#7d8f9f;--lbl-bg:rgba(9,13,18,.78);
     --hover:rgba(255,255,255,.05);--panel-bg:rgba(16,22,30,.95);--btn-bg:#1b2531;--btn-hover:#243043}
   html[data-theme='light']{--bg:#f3f6fb;--line:#d7e0ec;--txt:#1e293b;--dim:#64748b;
     --lbl-bg:rgba(255,255,255,.88);--hover:rgba(15,23,42,.05);--panel-bg:rgba(255,255,255,.95);
@@ -74,13 +74,21 @@
     font:500 11px ui-monospace,monospace;cursor:pointer}
   button.rst:hover{background:var(--btn-hover)}
   #err{position:fixed;inset:0;display:none;place-items:center;text-align:center;
-    font:400 13px/1.7 ui-monospace,monospace;color:var(--dim);padding:40px}
+    z-index:100;background:#fff;font:400 13px/1.7 ui-monospace,monospace;color:#64748b;padding:40px}
+  #loading{position:fixed;inset:0;z-index:90;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:10px;background:#fff;color:#1e293b;text-align:center}
+  #loading span{font:400 11px/1.4 ui-monospace,monospace;color:#64748b}
+  #loading .spin{width:34px;height:34px;border:3px solid #dbe5f1;border-top-color:#2878dc;
+    border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){#loading .spin{animation:none;border-top-color:#dbe5f1}}
   @media (max-width:760px){#panel{width:196px}#info{width:200px}#hint{display:none}}
 </style>
 </head>
 <body>
 <canvas id="cv"></canvas>
 <div id="labels"></div>
+<div id="loading"><i class="spin" aria-hidden="true"></i><b>Загрузка 3D-модели…</b><span>Подготовка оборудования и трубопроводов</span></div>
 
 <header>
   <h1>ЭЛОУ-АВТ-4 <span>— 3D-компоновка, масштаб 1:1</span></h1>
@@ -106,10 +114,17 @@
   <b>клик по аппарату</b> — характеристика, оператор идёт к позиции</div>
 <div id="err">Не удалось загрузить библиотеку Three.js.<br>Проверьте, что рядом с моделью лежит <b>three/three.min.js</b>.</div>
 
-<script src="three/three.min.js" async onerror="document.getElementById('err').style.display='grid'" onload="modelReady()"></script>
+<script>window.__ELOU_MODEL_REQUESTED_AT=performance.now();</script>
+<script src="three/three.min.js" defer onerror="document.getElementById('loading').style.display='none';document.getElementById('err').style.display='grid';try{window.parent.postMessage({type:'elou-model-error'},'*')}catch(_e){}" onload="modelReady()"></script>
 <script>
 function modelReady(){
-if (!window.THREE) { document.getElementById('err').style.display='grid'; return; }
+if (!window.THREE) {
+  document.getElementById('loading').style.display='none';
+  document.getElementById('err').style.display='grid';
+  try { window.parent.postMessage({type:'elou-model-error'}, '*'); } catch (_e) {}
+  return;
+}
+try {
 (function(){
 'use strict';
 
@@ -159,8 +174,13 @@ const PIPE = {
    СЦЕНА
    ============================================================ */
 const cv = document.getElementById('cv');
-const renderer = new THREE.WebGLRenderer({canvas:cv, antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const renderer = new THREE.WebGLRenderer({
+  canvas:cv,
+  antialias:true,
+  alpha:false,
+  powerPreference:'high-performance',
+});
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5));
 renderer.setSize(innerWidth, innerHeight);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xffffff);
@@ -169,6 +189,19 @@ const camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.5, 2400
 scene.add(new THREE.HemisphereLight(0x9fb6cc, 0x141a20, 0.75));
 const sun = new THREE.DirectionalLight(0xfff0dc, 0.85); sun.position.set(-90,160,110); scene.add(sun);
 const fill = new THREE.DirectionalLight(0x6f90b8, 0.35); fill.position.set(120,60,-120); scene.add(fill);
+/* Equipment is assembled from many repeated primitives. Cache immutable
+   geometries by constructor arguments so Three uploads each shape only once. */
+for(const geometryName of ['PlaneGeometry','BoxGeometry','CylinderGeometry','SphereGeometry','TorusGeometry','ConeGeometry']){
+  const OriginalGeometry=THREE[geometryName], cache=new Map();
+  function CachedGeometry(...args){
+    const key=JSON.stringify(args), existing=cache.get(key);
+    if(existing)return existing;
+    const geometry=new OriginalGeometry(...args); cache.set(key,geometry); return geometry;
+  }
+  CachedGeometry.prototype=OriginalGeometry.prototype;
+  Object.setPrototypeOf(CachedGeometry,OriginalGeometry);
+  THREE[geometryName]=CachedGeometry;
+}
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(1800,1200), new THREE.MeshLambertMaterial({color:0xe8ecf2}));
 ground.rotation.x = -Math.PI/2; ground.position.y = -0.02; scene.add(ground);
 
@@ -179,8 +212,22 @@ const dark   = new THREE.MeshLambertMaterial({color:0x4e5a66});
 const brick  = new THREE.MeshLambertMaterial({color:0x8d8378});
 const conc   = new THREE.MeshLambertMaterial({color:0x6a7078});
 const ceramic= new THREE.MeshLambertMaterial({color:0xd8cfc0});
-const acc = c => new THREE.MeshLambertMaterial({color:c});
+const accentMaterials=new Map();
+const acc = c => {
+  if(!accentMaterials.has(c))accentMaterials.set(c,new THREE.MeshLambertMaterial({color:c}));
+  return accentMaterials.get(c);
+};
 const pipeMats = {}; Object.entries(PIPE).forEach(([k,v]) => pipeMats[k] = new THREE.MeshLambertMaterial({color:v.c}));
+const cableFrameMat = new THREE.MeshLambertMaterial({color:0x6f7a85});
+const cableRailMat = new THREE.MeshLambertMaterial({color:0x828d98});
+/* Shared primitive geometries: pipe construction used to allocate hundreds of
+   identical BufferGeometry objects, causing long GC pauses during startup. */
+const UNIT_BOX_GEOMETRY = new THREE.BoxGeometry(1,1,1);
+const UNIT_PIPE_GEOMETRY = new THREE.CylinderGeometry(1,1,1,8);
+const UNIT_ELBOW_GEOMETRY = new THREE.SphereGeometry(1,8,6);
+function scaledBox(mat,w,h,d){
+  const m=new THREE.Mesh(UNIT_BOX_GEOMETRY,mat); m.scale.set(w,h,d); return m;
+}
 
 /* реестр */
 const picks = [], tagged = [], reg = [];
@@ -473,12 +520,34 @@ function pumpUnit(o){
    ТРУБОПРОВОДЫ
    ============================================================ */
 const UP = new THREE.Vector3(0,1,0), tmpA=new THREE.Vector3(), tmpB=new THREE.Vector3();
-function segment(g, a, b, r, mat){
-  tmpA.set(a[0],a[1],a[2]); tmpB.set(b[0],b[1],b[2]);
-  const dir = tmpB.clone().sub(tmpA); const len = dir.length(); if (len < 0.05) return;
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(r,r,len,10), mat);
-  m.position.copy(tmpA).addScaledVector(dir,0.5);
-  m.quaternion.setFromUnitVectors(UP, dir.normalize()); g.add(m);
+const instanceObject=new THREE.Object3D(), instanceQuat=new THREE.Quaternion();
+/* Flat numeric instance records avoid allocating thousands of Mesh/Object3D
+   objects. Pipes are not selectable, so batching them is behaviour-neutral. */
+function pushInstance(out,px,py,pz,sx,sy,sz,rx=0,ry=0,rz=0){
+  instanceObject.rotation.set(rx,ry,rz); const q=instanceObject.quaternion;
+  out.push(px,py,pz,sx,sy,sz,q.x,q.y,q.z,q.w);
+}
+function pushQuaternion(out,px,py,pz,sx,sy,sz,q){
+  out.push(px,py,pz,sx,sy,sz,q.x,q.y,q.z,q.w);
+}
+function addInstances(g,geometry,material,data){
+  const count=data.length/10; if(!count)return;
+  const batch=new THREE.InstancedMesh(geometry,material,count);
+  for(let i=0,o=0;i<count;i++,o+=10){
+    instanceObject.position.set(data[o],data[o+1],data[o+2]);
+    instanceObject.scale.set(data[o+3],data[o+4],data[o+5]);
+    instanceObject.quaternion.set(data[o+6],data[o+7],data[o+8],data[o+9]);
+    instanceObject.updateMatrix(); batch.setMatrixAt(i,instanceObject.matrix);
+  }
+  batch.instanceMatrix.needsUpdate=true;
+  batch.frustumCulled=false; // batches span long routes; avoid incorrect primitive bounds
+  g.add(batch);
+}
+function segment(out, a, b, r){
+  tmpA.set(a[0],a[1],a[2]); tmpB.set(b[0],b[1],b[2]).sub(tmpA);
+  const len=tmpB.length(); if(len<0.05)return;
+  instanceQuat.setFromUnitVectors(UP,tmpB.normalize());
+  pushQuaternion(out,(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2,r,len,r,instanceQuat);
 }
 /* ---------- запорная и регулирующая арматура ----------
    size — характерный размер по диаметру трубы, ось арматуры совпадает с осью трубы */
@@ -543,21 +612,23 @@ function pickOn(pts,idx,t){
 function runPipe(pts, r, type, zone, fit){
   const g=new THREE.Group(), mat=pipeMats[type];
   if(type==='cable'){ cableRack(g,pts); return add(g,{zone,layer:'pipe',selectable:false}); }
-  for(let i=0;i<pts.length-1;i++) segment(g, pts[i], pts[i+1], r, mat);
+  const pipeInstances=[], elbowInstances=[], supportInstances=[];
+  for(let i=0;i<pts.length-1;i++) segment(pipeInstances,pts[i],pts[i+1],r);
   for(let i=1;i<pts.length-1;i++){
-    const e=new THREE.Mesh(new THREE.SphereGeometry(r*1.12,10,8),mat);
-    e.position.set(pts[i][0],pts[i][1],pts[i][2]); g.add(e);}
+    pushInstance(elbowInstances,pts[i][0],pts[i][1],pts[i][2],r*1.12,r*1.12,r*1.12);}
   for(let i=0;i<pts.length-1;i++){
     const a=pts[i], b=pts[i+1];
     if (Math.abs(a[1]-b[1])>0.4 || a[1]>13) continue;
     const len=Math.hypot(b[0]-a[0], b[2]-a[2]); const n=Math.floor(len/11);
     for(let k=1;k<=n;k++){
       const t=k/(n+1), x=a[0]+(b[0]-a[0])*t, z=a[2]+(b[2]-a[2])*t;
-      const p=new THREE.Mesh(new THREE.BoxGeometry(0.3,a[1]-r,0.3),conc);
-      p.position.set(x,(a[1]-r)/2,z); g.add(p); SUPP.push([x,z]);
-      const sh=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.22,0.45),conc);
-      sh.position.set(x,a[1]-r-0.12,z); if(Math.abs(b[0]-a[0])<0.5) sh.rotation.y=Math.PI/2; g.add(sh);}
+      pushInstance(supportInstances,x,(a[1]-r)/2,z,0.3,a[1]-r,0.3); SUPP.push([x,z]);
+      pushInstance(supportInstances,x,a[1]-r-0.12,z,1.2,0.22,0.45,
+        0,Math.abs(b[0]-a[0])<0.5?Math.PI/2:0,0);}
   }
+  addInstances(g,UNIT_PIPE_GEOMETRY,mat,pipeInstances);
+  addInstances(g,UNIT_ELBOW_GEOMETRY,mat,elbowInstances);
+  addInstances(g,UNIT_BOX_GEOMETRY,conc,supportInstances);
   if(type!=='cable'){
     const v1=pickOn(pts,0,0.22);  if(v1) gateValve(g,v1.p,v1.ax,r);      // задвижка на выходе аппарата
     const v2=pickOn(pts,-1,0.80); if(v2) gateValve(g,v2.p,v2.ax,r);      // задвижка перед приёмником
@@ -573,43 +644,41 @@ function runPipe(pts, r, type, zone, fit){
 
 /* кабельная эстакада: стойки, поперечины, два яруса лотков и жгуты кабелей */
 function cableRack(g,pts){
+  const frameInstances=[], railInstances=[], cableInstances=[], concreteInstances=[], steelInstances=[];
   const tray=(a,b)=>{
     const dx=b[0]-a[0], dz=b[2]-a[2], len=Math.hypot(dx,dz);
     if(len<0.4) return;
     const along=Math.abs(dx)>Math.abs(dz);
     for(const lvl of [0,0.55]){
-      const bd=new THREE.Mesh(new THREE.BoxGeometry(along?len:0.85,0.08,along?0.85:len),
-        new THREE.MeshLambertMaterial({color:0x6f7a85}));
-      bd.position.set(a[0]+dx/2, a[1]+lvl, a[2]+dz/2); g.add(bd);
+      pushInstance(frameInstances,a[0]+dx/2,a[1]+lvl,a[2]+dz/2,along?len:0.85,0.08,along?0.85:len);
       for(const sd of [-1,1]){                                   // борта лотка
-        const rl=new THREE.Mesh(new THREE.BoxGeometry(along?len:0.1,0.16,along?0.1:len),
-          new THREE.MeshLambertMaterial({color:0x828d98}));
-        rl.position.set(a[0]+dx/2+(along?0:sd*0.42), a[1]+lvl+0.1, a[2]+dz/2+(along?sd*0.42:0)); g.add(rl);}
+        pushInstance(railInstances,a[0]+dx/2+(along?0:sd*0.42),a[1]+lvl+0.1,
+          a[2]+dz/2+(along?sd*0.42:0),along?len:0.1,0.16,along?0.1:len);}
       for(const off of [-0.22,0,0.22]){                          // жгуты кабелей
-        const cb=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,len,7),pipeMats.cable);
-        if(along) cb.rotation.z=Math.PI/2; else cb.rotation.x=Math.PI/2;
-        cb.position.set(a[0]+dx/2+(along?0:off), a[1]+lvl+0.16, a[2]+dz/2+(along?off:0)); g.add(cb);}
+        pushInstance(cableInstances,a[0]+dx/2+(along?0:off),a[1]+lvl+0.16,
+          a[2]+dz/2+(along?off:0),0.07,len,0.07,along?0:Math.PI/2,0,along?Math.PI/2:0);}
     }
     const n=Math.max(1,Math.round(len/8));                       // стойки эстакады
     for(let k=0;k<=n;k++){
       const t=k/n, x=a[0]+dx*t, z=a[2]+dz*t;
-      const p=new THREE.Mesh(new THREE.BoxGeometry(0.22,a[1]-0.1,0.22),conc);
-      p.position.set(x,(a[1]-0.1)/2,z); g.add(p); SUPP.push([x,z]);
+      pushInstance(concreteInstances,x,(a[1]-0.1)/2,z,0.22,a[1]-0.1,0.22); SUPP.push([x,z]);
       for(const lvl of [0,0.55]){
-        const arm=new THREE.Mesh(new THREE.BoxGeometry(along?0.16:1.3,0.14,along?1.3:0.16),steel2);
-        arm.position.set(x,a[1]+lvl-0.12,z); g.add(arm);}
+        pushInstance(steelInstances,x,a[1]+lvl-0.12,z,along?0.16:1.3,0.14,along?1.3:0.16);}
     }
   };
   for(let i=0;i<pts.length-1;i++){
     const a=pts[i], b=pts[i+1];
     if(Math.abs(a[1]-b[1])>0.3){                                 // вертикальный спуск в стояке
       const h=Math.abs(a[1]-b[1]);
-      const ch=new THREE.Mesh(new THREE.BoxGeometry(0.5,h,0.5),
-        new THREE.MeshLambertMaterial({color:0x6f7a85}));
-      ch.position.set(a[0],(a[1]+b[1])/2,a[2]); g.add(ch);
+      pushInstance(frameInstances,a[0],(a[1]+b[1])/2,a[2],0.5,h,0.5);
       continue;}
     tray(a,b);
   }
+  addInstances(g,UNIT_BOX_GEOMETRY,cableFrameMat,frameInstances);
+  addInstances(g,UNIT_BOX_GEOMETRY,cableRailMat,railInstances);
+  addInstances(g,UNIT_PIPE_GEOMETRY,pipeMats.cable,cableInstances);
+  addInstances(g,UNIT_BOX_GEOMETRY,conc,concreteInstances);
+  addInstances(g,UNIT_BOX_GEOMETRY,steel2,steelInstances);
 }
 
 /* ---------- сетка проходимости площадки ---------- */
@@ -634,7 +703,7 @@ function buildComponents(){
     const st=[c]; comp[c]=id; let n=0;
     while(st.length){ const q=st.pop(); n++;
       const qi=q%GNX, qj=(q-qi)/GNX;
-      for(const [di,dj] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      for(const [di,dj] of DIRS){
         const ii=qi+di, jj=qj+dj;
         if(ii<0||jj<0||ii>=GNX||jj>=GNZ) continue;
         const nc=jj*GNX+ii;
@@ -687,40 +756,61 @@ function findExit(x,z){
 
 /* А* по четырём направлениям со штрафом за поворот — ортогональная трасса вокруг аппаратов */
 const DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
+const ROUTE_STATE_COUNT=GNX*GNZ*5;
+const routeCost=new Float32Array(ROUTE_STATE_COUNT);
+const routePrev=new Int32Array(ROUTE_STATE_COUNT);
+const routeSeen=new Uint32Array(ROUTE_STATE_COUNT);
+const routeClosed=new Uint32Array(ROUTE_STATE_COUNT);
+const routeCache=new Map();
+let routeEpoch=0;
 function routeGrid(a,b){
   const si=ci(a[0]), sj=cj(a[1]), gi=ci(b[0]), gj=cj(b[1]);
   if(si===gi&&sj===gj) return [[wx(si),wz(sj)]];
-  const S=GNX*GNZ*5;
-  const g=new Float32Array(S).fill(Infinity), prev=new Int32Array(S).fill(-1);
-  const heap=[];
-  const push=(f,s)=>{heap.push([f,s]); let c=heap.length-1;
-    while(c>0){const p=(c-1)>>1; if(heap[p][0]<=heap[c][0])break; const t=heap[p];heap[p]=heap[c];heap[c]=t; c=p;}};
-  const pop=()=>{const top=heap[0], last=heap.pop();
-    if(heap.length){heap[0]=last; let c=0;
-      for(;;){let m=c; const l=2*c+1,rr=2*c+2;
-        if(l<heap.length&&heap[l][0]<heap[m][0])m=l;
-        if(rr<heap.length&&heap[rr][0]<heap[m][0])m=rr;
-        if(m===c)break; const t=heap[m];heap[m]=heap[c];heap[c]=t; c=m;}}
-    return top;};
+  const key=si+','+sj+'>'+gi+','+gj, reverseKey=gi+','+gj+'>'+si+','+sj;
+  if(routeCache.has(key)) return routeCache.get(key);
+  if(routeCache.has(reverseKey)){
+    const reversed=routeCache.get(reverseKey).slice().reverse(); routeCache.set(key,reversed); return reversed;}
+  routeEpoch=(routeEpoch+1)>>>0;
+  if(routeEpoch===0){routeSeen.fill(0);routeClosed.fill(0);routeEpoch=1;}
+  const heapF=[], heapS=[];
+  const push=(f,s)=>{let c=heapF.length; heapF.push(f);heapS.push(s);
+    while(c>0){const p=(c-1)>>1;if(heapF[p]<=f)break;
+      heapF[c]=heapF[p];heapS[c]=heapS[p];c=p;}
+    heapF[c]=f;heapS[c]=s;};
+  const pop=()=>{const state=heapS[0], lastF=heapF.pop(), lastS=heapS.pop();
+    if(heapF.length){let c=0;
+      for(;;){const l=2*c+1,rr=l+1;if(l>=heapF.length)break;
+        const m=rr<heapF.length&&heapF[rr]<heapF[l]?rr:l;
+        if(heapF[m]>=lastF)break;
+        heapF[c]=heapF[m];heapS[c]=heapS[m];c=m;}
+      heapF[c]=lastF;heapS[c]=lastS;}
+    return state;};
   const H=(i,j)=>Math.abs(i-gi)+Math.abs(j-gj);
-  const s0=(sj*GNX+si)*5+4; g[s0]=0; push(H(si,sj)*0.55,s0);
+  const s0=(sj*GNX+si)*5+4;
+  routeSeen[s0]=routeEpoch;routeCost[s0]=0;routePrev[s0]=-1;push(H(si,sj)*0.55,s0);
   let goal=-1, guard=0;
-  while(heap.length && guard++<2000000){
-    const st=pop()[1]; const cell=Math.floor(st/5), d=st%5;
+  while(heapF.length && guard++<2000000){
+    const st=pop();
+    if(routeClosed[st]===routeEpoch)continue;
+    routeClosed[st]=routeEpoch;
+    const cell=Math.floor(st/5), d=st%5;
     const i=cell%GNX, j=(cell-i)/GNX;
     if(i===gi&&j===gj){ goal=st; break; }
     for(let k=0;k<4;k++){
       const ii=i+DIRS[k][0], jj=j+DIRS[k][1];
       if(!freeC(ii,jj)) continue;
       const ns=(jj*GNX+ii)*5+k;
-      const ng=g[st]+stepCost(ii,jj)+((d!==4&&d!==k)?3:0);
-      if(ng<g[ns]){ g[ns]=ng; prev[ns]=st; push(ng+H(ii,jj)*0.55, ns); }
+      if(routeClosed[ns]===routeEpoch)continue;
+      const ng=routeCost[st]+stepCost(ii,jj)+((d!==4&&d!==k)?3:0);
+      if(routeSeen[ns]!==routeEpoch||ng<routeCost[ns]){
+        routeSeen[ns]=routeEpoch;routeCost[ns]=ng;routePrev[ns]=st;
+        push(ng+H(ii,jj)*0.55,ns);}
     }
   }
   if(goal<0) return null;
   const out=[]; let st=goal;
   while(st>=0){ const cell=Math.floor(st/5), i=cell%GNX, j=(cell-i)/GNX;
-    out.push([wx(i),wz(j)]); st=prev[st]; }
+    out.push([wx(i),wz(j)]); st=routePrev[st]; }
   out.reverse();
   const simp=[out[0]];                       // оставляем только точки перелома
   for(let i=1;i<out.length-1;i++){
@@ -730,6 +820,7 @@ function routeGrid(a,b){
     if(d1x!==d2x || d1z!==d2z) simp.push(b);
   }
   simp.push(out[out.length-1]);
+  routeCache.set(key,simp);
   return simp;
 }
 
@@ -1496,7 +1587,7 @@ document.getElementById('reset').onclick=()=>{dist=HOME.dist;yaw=HOME.yaw;pitch=
    ВЫБОР
    ============================================================ */
 const ray=new THREE.Raycaster(), ptr=new THREE.Vector2();
-let selected=null; const info=document.getElementById('info');
+let selected=null, selectedMaterialBackups=[]; const info=document.getElementById('info');
 cv.addEventListener('click',e=>{ if(moved>6)return;
   ptr.x=(e.clientX/innerWidth)*2-1; ptr.y=-(e.clientY/innerHeight)*2+1;
   ray.setFromCamera(ptr,camera);
@@ -1505,14 +1596,34 @@ cv.addEventListener('click',e=>{ if(moved>6)return;
   let g=hit.object; while(g.parent&&!(g.userData&&g.userData.tag)) g=g.parent;
   if(!g.userData||!g.userData.tag){deselect();return;}
   select(g);});
-function deselect(){ if(selected) selected.traverse(m=>{if(m.isMesh&&m.material.emissive)m.material.emissive.setHex(0x000000);});
-  selected=null; info.style.display='none';}
-cv.addEventListener('mousemove',e=>{
-  ptr.x=(e.clientX/innerWidth)*2-1; ptr.y=-(e.clientY/innerHeight)*2+1;
-  ray.setFromCamera(ptr,camera);
-  cv.style.cursor = ray.intersectObjects(picks,false).length ? 'pointer' : 'grab';});
+function deselect(){
+  for(const {mesh,original,highlight} of selectedMaterialBackups){
+    mesh.material=original;
+    for(const material of highlight)material.dispose();
+  }
+  selectedMaterialBackups=[];selected=null;info.style.display='none';
+}
+let hoverX=0,hoverY=0,hoverFrame=0;
+cv.addEventListener('pointermove',e=>{
+  hoverX=e.clientX;hoverY=e.clientY;
+  if(hoverFrame||drag)return;
+  hoverFrame=requestAnimationFrame(()=>{
+    hoverFrame=0;
+    ptr.x=(hoverX/innerWidth)*2-1;ptr.y=-(hoverY/innerHeight)*2+1;
+    ray.setFromCamera(ptr,camera);
+    const hits=ray.intersectObjects(picks,false);
+    cv.style.cursor=hits.some(h=>h.object.parent&&h.object.parent.visible)?'pointer':'grab';
+  });});
 function select(g){ deselect(); selected=g;
-  g.traverse(m=>{if(m.isMesh&&m.material.emissive)m.material.emissive.setHex(0x1d3040);});
+  /* Base materials and geometries are shared for startup performance. Clone
+     only the selected object's materials so highlighting cannot tint peers. */
+  g.traverse(m=>{if(m.isMesh){
+    const original=m.material, source=Array.isArray(original)?original:[original];
+    const highlight=source.map(material=>{const clone=material.clone();
+      if(clone.emissive)clone.emissive.setHex(0x1d3040);return clone;});
+    selectedMaterialBackups.push({mesh:m,original,highlight});
+    m.material=Array.isArray(original)?highlight:highlight[0];
+  }});
   const d=g.userData, z=ZONES[d.zone];
   const t=document.getElementById('i-tag'); t.textContent=d.tag; t.style.color='#'+z.c.toString(16).padStart(6,'0');
   document.getElementById('i-name').textContent=d.name||'';
@@ -1563,9 +1674,13 @@ legEl.style.paddingBottom='6px';
    ============================================================ */
 const v=new THREE.Vector3();
 let tPrev=performance.now();
+let lastRenderedAt=0, readySent=false;
 let fieldErrors = [], fieldSent = {}, fieldSession = null, markers = [];
-function frame(){
-  const tNow=performance.now(); const dt=Math.min(0.05,(tNow-tPrev)/1000); tPrev=tNow;
+function frame(tNow){
+  requestAnimationFrame(frame);
+  if(document.hidden||tNow-lastRenderedAt<33)return;
+  lastRenderedAt=tNow;
+  const dt=Math.min(0.05,(tNow-tPrev)/1000); tPrev=tNow;
   stepWalker(dt);
   renderer.render(scene,camera);
   for(const t of tagged){
@@ -1591,8 +1706,17 @@ function frame(){
     m.bead.scale.set(s, s, s);
     m.ring.material.opacity = 0.45 + 0.4 * Math.sin(tAbs * 3.2 + m.phase);
   }
-  requestAnimationFrame(frame);}
-frame();
+  if(!readySent){
+    readySent=true;
+    const loading=document.getElementById('loading'); if(loading)loading.style.display='none';
+    try{window.parent.postMessage({
+      type:'elou-model-ready',
+      duration_ms:Math.round(performance.now()-(window.__ELOU_MODEL_REQUESTED_AT||0)),
+      objects:reg.length,
+      selectable:picks.length,
+    },'*');}catch(_e){}
+  }}
+requestAnimationFrame(frame);
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);});
 
@@ -1651,26 +1775,24 @@ function setFieldErrors(errors, sessionId){
 function renderFieldDefect(tag){
   const el = document.getElementById('i-fde');
   const err = fieldErrors.find(x => x.object_id === tag);
-  if (!err) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  if (!err) { el.style.display = 'none'; el.replaceChildren(); return; }
   const sent = fieldSent[tag];
   el.style.display = 'block';
-  el.className = 'fde sev-' + (err.severity || 'info');
-  el.innerHTML =
-    '<div class="fde-head">Дефект · ' + (FIELD_SEV_LABEL[err.severity] || err.severity || '') + '</div>' +
-    '<div class="fde-title"></div>' +
-    '<div class="fde-desc"></div>' +
-    (sent
-      ? '<button class="fde-btn" disabled>Отправлено консольному</button>'
-      : '<button class="fde-btn">Отправить консольному оператору</button>');
-  el.querySelector('.fde-title').textContent = err.title || '';
-  el.querySelector('.fde-desc').textContent = err.description || '';
-  const btn = el.querySelector('button.fde-btn');
-  if (btn) btn.onclick = () => {
+  const severity=Object.prototype.hasOwnProperty.call(FIELD_COLORS,err.severity)?err.severity:'info';
+  el.className='fde sev-'+severity;
+  const head=document.createElement('div');head.className='fde-head';
+  head.textContent='Дефект · '+FIELD_SEV_LABEL[severity];
+  const title=document.createElement('div');title.className='fde-title';title.textContent=err.title||'';
+  const desc=document.createElement('div');desc.className='fde-desc';desc.textContent=err.description||'';
+  const btn=document.createElement('button');btn.className='fde-btn';btn.type='button';
+  btn.textContent=sent?'Отправлено консольному':'Отправить консольному оператору';btn.disabled=Boolean(sent);
+  el.replaceChildren(head,title,desc,btn);
+  if (!sent) btn.onclick = () => {
     try { window.parent.postMessage({ type: 'elou-field-send', object_id: tag }, '*'); } catch (_e) {}
   };
 }
 addEventListener('message', e => {
-  if (!e.data) return;
+  if (!e.data || e.source !== window.parent) return;
   if (e.data.type === 'elou-theme') applyTheme(e.data.theme);
   else if (e.data.type === 'elou-field-errors') setFieldErrors(e.data.errors, e.data.session_id);
   else if (e.data.type === 'elou-field-sent') {
@@ -1679,6 +1801,12 @@ addEventListener('message', e => {
   }
 });
 })();
+} catch (error) {
+  console.error('3D model initialization failed', error);
+  const loading=document.getElementById('loading');if(loading)loading.style.display='none';
+  const err=document.getElementById('err');if(err){err.textContent='Не удалось подготовить 3D-модель. Проверьте поддержку WebGL.';err.style.display='grid';}
+  try { window.parent.postMessage({type:'elou-model-error'}, '*'); } catch (_e) {}
+}
 }
 </script>
 </body>

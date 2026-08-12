@@ -23,7 +23,9 @@ foreign_keys, RLock) so the two stores can share one database file.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import secrets
 import sqlite3
 import threading
 import time
@@ -45,6 +47,47 @@ from .security import create_token, hash_password, verify_password, verify_token
 logger = logging.getLogger("elou_avt.auth")
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "sessions.db"
+DEFAULT_SECRET_PATH = Path(__file__).resolve().parent.parent / ".auth_secret"
+
+
+def _load_token_secret(explicit: Optional[str] = None) -> str:
+    """Resolve the signing secret without shipping a universal demo secret.
+
+    Production requires ``ELOU_AUTH_SECRET``.  Local MVP runs generate a
+    strong per-installation secret once, which keeps the one-click demo login
+    working while preventing tokens from one copy of the project being valid
+    in every other copy.
+    """
+    secret = explicit or os.environ.get("ELOU_AUTH_SECRET", "").strip()
+    environment = os.environ.get("ELOU_ENV", "development").strip().lower()
+    if secret:
+        if len(secret) < 32:
+            raise RuntimeError("ELOU_AUTH_SECRET must contain at least 32 characters")
+        return secret
+    if environment in {"prod", "production"}:
+        raise RuntimeError("ELOU_AUTH_SECRET is required in production")
+
+    path = Path(os.environ.get("ELOU_AUTH_SECRET_FILE", str(DEFAULT_SECRET_PATH)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        existing = path.read_text(encoding="utf-8").strip()
+        if len(existing) >= 32:
+            return existing
+    except FileNotFoundError:
+        pass
+
+    generated = secrets.token_urlsafe(48)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(generated)
+            stream.write("\n")
+        return generated
+    except FileExistsError:
+        existing = path.read_text(encoding="utf-8").strip()
+        if len(existing) < 32:
+            raise RuntimeError(f"Token secret file {path} is invalid")
+        return existing
 
 # ---------------------------------------------------------------------------
 # Permission catalog (single source of truth; "can_*" codes used everywhere).
@@ -535,7 +578,7 @@ class AuthService:
         token_ttl: int = 8 * 3600,
     ):
         self._store = store or AuthStore()
-        self._secret = secret or "elou-avt-dev-secret-change-me"
+        self._secret = _load_token_secret(secret)
         self._ttl = token_ttl
         self._store.ensure_catalog()
         self._store.ensure_default_users()

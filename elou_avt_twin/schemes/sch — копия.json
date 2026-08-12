@@ -1857,7 +1857,7 @@
       "target_port": "reflux"
     }
   ],
-  "id": "default",
+  "id": "sch — копия",
   "name": "ЭЛОУ-АВТ / default",
   "nodes": [
     {
@@ -1909,7 +1909,7 @@
       "y": -722.0
     },
     {
-      "id": "pum_8",
+      "id": "pum_8__dup2",
       "name": "Н1-Б",
       "params": {
         "efficiency_nominal": 0.75,
@@ -1967,7 +1967,7 @@
       "y": -723.0
     },
     {
-      "id": "source_13",
+      "id": "source_13__dup2",
       "name": "ц.о. К-2",
       "params": {
         "flow_kg_s": 100,
@@ -5756,5 +5756,5 @@
       "y": -163.0
     }
   ],
-  "schema_version": "1.1"
+  "schema_version": "1.2"
 }

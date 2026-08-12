@@ -11,10 +11,10 @@ Authorization model:
   never against a literal role.
 
 `ELOU_AUTH_MODE` controls enforcement:
-* "disabled" (default, dev): requests without a token act as a system
+* "disabled" (explicit local troubleshooting only): requests without a token act as a system
   principal with every permission, so the legacy demo UI and the existing
   test-suite keep working unchanged;
-* "enabled": a valid Bearer token is required (401) and permission checks
+* "enabled" (default): a valid Bearer token is required (401) and permission checks
   apply (403).
 """
 
@@ -28,7 +28,14 @@ from fastapi import Depends, HTTPException, Request, status
 from .models import Principal
 from .store import ALL_PERMISSION_CODES, AuthService, AuthStore
 
-AUTH_MODE = os.environ.get("ELOU_AUTH_MODE", "disabled").lower()
+AUTH_MODE = os.environ.get("ELOU_AUTH_MODE", "enabled").strip().lower()
+if AUTH_MODE not in {"enabled", "disabled"}:
+    raise RuntimeError("ELOU_AUTH_MODE must be 'enabled' or 'disabled'")
+if (
+    AUTH_MODE == "disabled"
+    and os.environ.get("ELOU_ENV", "development").strip().lower() in {"prod", "production"}
+):
+    raise RuntimeError("ELOU_AUTH_MODE=disabled is forbidden in production")
 
 _system_principal = Principal(
     username="system",
@@ -82,7 +89,7 @@ def require_permission(code: str):
 
 
 def authenticate_websocket(token: str) -> Optional[Principal]:
-    """Resolve a WebSocket caller from the `token` query parameter."""
+    """Resolve a WebSocket caller from its handshake credential."""
     principal = _auth_service.principal_from_token(token) if token else None
     if AUTH_MODE == "disabled":
         return _system_principal

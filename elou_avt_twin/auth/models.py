@@ -21,8 +21,8 @@ class Principal(BaseModel):
 
     username: str
     full_name: str = ""
-    roles: List[str] = []
-    permissions: List[str] = []
+    roles: List[str] = Field(default_factory=list)
+    permissions: List[str] = Field(default_factory=list)
     is_system: bool = False
 
     def has_permission(self, code: str) -> bool:
@@ -34,15 +34,15 @@ class UserView(BaseModel):
     username: str
     full_name: str = ""
     is_active: bool = True
-    roles: List[str] = []
-    permissions: List[str] = []
+    roles: List[str] = Field(default_factory=list)
+    permissions: List[str] = Field(default_factory=list)
 
 
 class RoleView(BaseModel):
     code: str
     name: str
     description: str = ""
-    permissions: List[str] = []
+    permissions: List[str] = Field(default_factory=list)
 
 
 class PermissionView(BaseModel):
@@ -51,8 +51,8 @@ class PermissionView(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1, max_length=256)
 
 
 class LoginResponse(BaseModel):
@@ -63,21 +63,21 @@ class LoginResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    username: str
-    password: str
-    full_name: str = ""
-    role_codes: List[str] = []
+    username: str = Field(..., min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(..., min_length=4, max_length=256)
+    full_name: str = Field("", max_length=128)
+    role_codes: List[str] = Field(default_factory=list)
 
 
 class RoleAssign(BaseModel):
-    role_codes: List[str] = []
+    role_codes: List[str] = Field(default_factory=list)
 
 
 class RoleCreate(BaseModel):
     code: str = Field(..., min_length=1, max_length=64)
     name: str = Field(..., min_length=1, max_length=128)
-    description: str = ""
-    permission_codes: List[str] = []
+    description: str = Field("", max_length=512)
+    permission_codes: List[str] = Field(default_factory=list)
 
 
 class RoleUpdate(BaseModel):
@@ -86,4 +86,4 @@ class RoleUpdate(BaseModel):
 
 
 class RolePermissions(BaseModel):
-    permission_codes: List[str] = []
+    permission_codes: List[str] = Field(default_factory=list)

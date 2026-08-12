@@ -1,12 +1,15 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, Union
+import os
 import threading
 import time
 import logging
 import traceback
 import re
+import uuid
 from pathlib import Path
 
 from models.base import SimulationConfig, OperatorAction, ActionType
@@ -14,7 +17,14 @@ from models.command import Command, CommandAction
 from models.session import TrainingSession
 from models.scenario import Scenario
 from simulation_core.digital_twin import DigitalTwin
-from scheme import ProcessScheme, SchemeNode, SchemeEdge, load_scheme, save_scheme
+from scheme import (
+    ProcessScheme,
+    SchemeNode,
+    SchemeEdge,
+    load_scheme,
+    save_scheme,
+    migrate_scheme_data,
+)
 from equipment.params_spec import editor_spec, coerce, spec_for, NON_EDITABLE_TYPES
 from controls import ControlSystem
 from scenarios.scenario_registry import SCENARIO_REGISTRY
@@ -23,6 +33,7 @@ from persistence.session_recorder import SessionRecorder
 from auth.deps import authenticate_websocket, get_auth_service, get_current_user, require_permission
 from auth.models import (
     LoginRequest,
+    Principal,
     RoleAssign,
     RoleCreate,
     RolePermissions,
@@ -39,8 +50,44 @@ from lms.scenario_service import to_engine_scenario
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("elou_avt.api")
 
-app = FastAPI(title="ELOU-AVT Digital Twin API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="ELOU-AVT Digital Twin API", version="1.1.0")
+
+
+def _cors_origins() -> list[str]:
+    configured = os.environ.get("ELOU_CORS_ORIGINS", "")
+    if configured.strip():
+        origins = [value.strip() for value in configured.split(",") if value.strip()]
+        if "*" in origins:
+            raise RuntimeError("ELOU_CORS_ORIGINS='*' is not allowed with authenticated requests")
+        return origins
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Cache-Control", "no-store")
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 app.include_router(lms_router)
 app.include_router(lms_content_router)
 
@@ -69,6 +116,8 @@ class ActionRequest(BaseModel):
     equipment_id: str
     action_type: ActionType
     value: Optional[float] = None
+    # Kept for backward compatibility with old demo clients. HTTP handlers
+    # always use the authenticated principal instead of trusting this field.
     operator_id: str = "demo"
 
 class InputRequest(BaseModel):
@@ -161,6 +210,27 @@ inputs: Dict[str, float] = {"flow_kg_s": 100.0, "temperature_c": 25.0, "pressure
 _DEFAULT_SCHEME = "process_elou_avt"
 SCHEME_DIR = Path(__file__).resolve().parent / "schemes"
 _LAST_SCHEME_FILE = SCHEME_DIR / ".last_scheme"
+_SCHEME_NAME_RE = re.compile(r"^[\w .()—-]+$", re.UNICODE)
+
+
+def _scheme_path(name: str) -> Path:
+    """Resolve a scheme name inside SCHEME_DIR and reject path traversal."""
+    clean = name.strip()
+    if (
+        not clean
+        or len(clean) > 128
+        or clean.startswith(".")
+        or clean.endswith((".", " "))
+        or "/" in clean
+        or "\\" in clean
+        or "\x00" in clean
+        or not _SCHEME_NAME_RE.fullmatch(clean)
+    ):
+        raise ValueError("Invalid scheme name")
+    path = (SCHEME_DIR / f"{clean}.json").resolve()
+    if path.parent != SCHEME_DIR.resolve():
+        raise ValueError("Invalid scheme path")
+    return path
 
 
 def _last_used_scheme() -> str:
@@ -168,9 +238,9 @@ def _last_used_scheme() -> str:
     try:
         if _LAST_SCHEME_FILE.exists():
             name = _LAST_SCHEME_FILE.read_text(encoding="utf-8-sig").strip()
-            if name and (SCHEME_DIR / f"{name}.json").exists():
+            if name and _scheme_path(name).exists():
                 return name
-    except Exception:
+    except (OSError, ValueError):
         logger.exception("Failed to read last-used scheme marker.")
     return _DEFAULT_SCHEME
 
@@ -178,8 +248,12 @@ def _last_used_scheme() -> str:
 def _remember_scheme(name: str) -> None:
     """Persist the id of the last active scheme so it re-opens on restart."""
     try:
-        _LAST_SCHEME_FILE.write_text(name.strip(), encoding="utf-8")
-    except Exception:
+        clean = name.strip()
+        _scheme_path(clean)
+        tmp = _LAST_SCHEME_FILE.with_suffix(".tmp")
+        tmp.write_text(clean, encoding="utf-8")
+        tmp.replace(_LAST_SCHEME_FILE)
+    except (OSError, ValueError):
         logger.exception("Failed to write last-used scheme marker.")
 
 
@@ -202,7 +276,7 @@ def _restore_alarm_setpoints() -> None:
         logger.exception("Failed to restore alarm setpoints")
 
 
-scheme_store: ProcessScheme = load_scheme(SCHEME_DIR / f"{_last_used_scheme()}.json")
+scheme_store: ProcessScheme = load_scheme(_scheme_path(_last_used_scheme()))
 twin._engine.set_scheme(scheme_store)
 _restore_alarm_setpoints()
 
@@ -538,9 +612,58 @@ def health():
 # Authentication & RBAC (см. auth/ — ролевая модель из Роли.txt)
 # ---------------------------------------------------------------------------
 
+_login_attempts: Dict[str, list[float]] = {}
+_login_attempts_lock = threading.Lock()
+_LOGIN_WINDOW_SECONDS = 60.0
+_LOGIN_MAX_FAILURES = 5
+
+
+def _login_key(request: Request, username: str) -> str:
+    client = request.client.host if request.client else "unknown"
+    return f"{client}:{username.strip().lower()}"
+
+
+def _check_login_rate(key: str) -> None:
+    now = time.monotonic()
+    with _login_attempts_lock:
+        recent = [stamp for stamp in _login_attempts.get(key, ())
+                  if now - stamp < _LOGIN_WINDOW_SECONDS]
+        if recent:
+            _login_attempts[key] = recent
+        else:
+            _login_attempts.pop(key, None)
+        if len(recent) >= _LOGIN_MAX_FAILURES:
+            retry_after = max(1, int(_LOGIN_WINDOW_SECONDS - (now - recent[0])))
+            raise HTTPException(
+                status_code=429,
+                detail="Слишком много попыток входа. Повторите позже.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+
+def _record_login_result(key: str, success: bool) -> None:
+    with _login_attempts_lock:
+        if success:
+            _login_attempts.pop(key, None)
+        else:
+            attempts = _login_attempts.setdefault(key, [])
+            attempts.append(time.monotonic())
+            # Prevent an unbounded dictionary if many synthetic usernames are tried.
+            if len(_login_attempts) > 10_000:
+                cutoff = time.monotonic() - _LOGIN_WINDOW_SECONDS
+                stale = [item for item, stamps in _login_attempts.items()
+                         if not stamps or stamps[-1] < cutoff]
+                for item in stale:
+                    _login_attempts.pop(item, None)
+                while len(_login_attempts) > 10_000:
+                    _login_attempts.pop(next(iter(_login_attempts)))
+
 @app.post("/auth/login")
-def auth_login(req: LoginRequest):
+def auth_login(req: LoginRequest, request: Request):
+    key = _login_key(request, req.username)
+    _check_login_rate(key)
     resp = get_auth_service().authenticate(req.username, req.password)
+    _record_login_result(key, resp is not None)
     if resp is None:
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     return resp
@@ -714,15 +837,26 @@ def controller_detail(tag: str):
             raise HTTPException(status_code=404, detail=f"Регулятор '{tag}' не найден")
         return control_system.faceplate(tag)
 
+def _request_actor(current_user: object, legacy_value: str = "demo") -> str:
+    """Use the authenticated identity; keep direct Python calls compatible."""
+    if isinstance(current_user, Principal):
+        return current_user.username
+    return legacy_value
+
+
 @app.post("/command", dependencies=[Depends(require_permission("send_commands"))])
-def command(req: CommandRequest):
+def command(
+    req: CommandRequest,
+    current_user: Principal = Depends(get_current_user),
+):
     """Apply one operator command to a control loop."""
+    actor = _request_actor(current_user, req.operator_id)
     with lock:
         cmd = Command(
             tag=req.tag,
             action=req.action,
             value=req.value,
-            operator_id=req.operator_id,
+            operator_id=actor,
             timestamp=twin._simulation_time,
             source="hmi",
         )
@@ -733,7 +867,7 @@ def command(req: CommandRequest):
         if session_recorder is not None and session_recorder.active:
             op_action = OperatorAction(
                 timestamp=twin._simulation_time,
-                operator_id=req.operator_id,
+                operator_id=actor,
                 equipment_id=req.tag,
                 action_type=ActionType(req.action.value),
                 old_value=getattr(ctrl, "sp", None),
@@ -758,7 +892,10 @@ def _resolve_scenario(scenario_id: str) -> Optional[Scenario]:
 
 
 @app.post("/training/session", dependencies=[Depends(require_permission("start_training"))])
-def start_training_session(req: StartSessionRequest):
+def start_training_session(
+    req: StartSessionRequest,
+    current_user: Principal = Depends(get_current_user),
+):
     """Open a training session for a scenario (contract; scoring in Этап 7)."""
     global _training_session
     scenario_obj = _resolve_scenario(req.scenario_id)
@@ -769,10 +906,18 @@ def start_training_session(req: StartSessionRequest):
         # If a previous session is still open, close it as aborted first.
         if session_recorder.active:
             session_recorder.abort(reason="superseded by a new session")
-        session_id = f"TR-{int(time.time())}"
+        requested_operator = req.operator_id.strip()
+        if isinstance(current_user, Principal):
+            # Instructors may launch a session for a selected operator. Regular
+            # operators can only create a session under their own identity.
+            can_assign = current_user.has_permission("monitor_operators")
+            operator_id = requested_operator if can_assign and requested_operator not in {"", "demo"} else current_user.username
+        else:
+            operator_id = requested_operator or "demo"
+        session_id = f"TR-{time.time_ns()}-{uuid.uuid4().hex[:8]}"
         session_recorder.begin(
             scenario_id=req.scenario_id,
-            operator_id=req.operator_id,
+            operator_id=operator_id,
             scheme_version=scheme_store.id,
             reference_actions=scenario_obj.reference_actions,
             sim_start=twin._simulation_time,
@@ -781,7 +926,7 @@ def start_training_session(req: StartSessionRequest):
         _training_session = TrainingSession(
             session_id=session_id,
             scenario_id=req.scenario_id,
-            operator_id=req.operator_id,
+            operator_id=operator_id,
         )
         _training_session.start(twin._simulation_time)
         return _training_session.model_dump()
@@ -854,7 +999,11 @@ def set_input(req: InputRequest):
         return _snapshot_state()
 
 @app.post("/action", dependencies=[Depends(require_permission("send_commands"))])
-def action(req: ActionRequest):
+def action(
+    req: ActionRequest,
+    current_user: Principal = Depends(get_current_user),
+):
+    actor = _request_actor(current_user, req.operator_id)
     with lock:
         node = scheme_store.node(req.equipment_id)
         value = req.value
@@ -863,7 +1012,7 @@ def action(req: ActionRequest):
             value = value / 100.0
         action = OperatorAction(
             timestamp=twin._simulation_time,
-            operator_id=req.operator_id,
+            operator_id=actor,
             equipment_id=req.equipment_id,
             action_type=req.action_type,
             old_value=_current_regulated_value(req.equipment_id),
@@ -1049,7 +1198,7 @@ def _sync_runtime_params() -> None:
 def _save_current_scheme() -> None:
     """Persist the current scheme to its own JSON file (not the default)."""
     _sync_runtime_params()
-    save_scheme(scheme_store, SCHEME_DIR / f"{scheme_store.id}.json")
+    save_scheme(scheme_store, _scheme_path(scheme_store.id))
     _remember_scheme(scheme_store.id)
 
 
@@ -1084,13 +1233,20 @@ def _reconfigure(new_scheme: ProcessScheme) -> None:
 def load_scheme_endpoint(req: SchemeLoadRequest):
     """Load a P&ID scheme by name and reconfigure the engine on it."""
     with lock:
-        path = SCHEME_DIR / f"{req.name}.json"
+        try:
+            path = _scheme_path(req.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"Scheme '{req.name}' not found")
         try:
             new_scheme = load_scheme(path)
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Invalid scheme: {e}")
+        # A number of legacy copies contain id="default" internally. The file
+        # name is the authoritative identity; otherwise saving a loaded copy
+        # could overwrite default.json.
+        new_scheme.id = path.stem
         _reconfigure(new_scheme)
         _refresh_snapshot()
         return _snapshot_state()
@@ -1103,12 +1259,10 @@ def create_scheme_endpoint(req: SchemeCreateRequest):
     """Create an empty P&ID scheme by name and switch the engine to it."""
     with lock:
         name = req.name.strip()
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
-            raise HTTPException(
-                status_code=422,
-                detail="Invalid scheme name (use latin letters, digits, '_' or '-')",
-            )
-        path = SCHEME_DIR / f"{name}.json"
+        try:
+            path = _scheme_path(name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if path.exists():
             raise HTTPException(status_code=409, detail=f"Scheme '{name}' already exists")
         new_scheme = ProcessScheme(id=name, name=f"Схема «{name}»", nodes=[], edges=[])
@@ -1120,8 +1274,8 @@ def create_scheme_endpoint(req: SchemeCreateRequest):
 class SchemeRequest(BaseModel):
     id: str = ""
     name: str = ""
-    nodes: list = []
-    edges: list = []
+    nodes: list = Field(default_factory=list)
+    edges: list = Field(default_factory=list)
 
 @app.post("/scheme", dependencies=[Depends(require_permission("manage_scheme"))])
 def post_scheme(req: SchemeRequest):
@@ -1132,15 +1286,19 @@ def post_scheme(req: SchemeRequest):
     with lock:
         global scheme_store
         try:
-            new_scheme = ProcessScheme(
-                id=req.id or scheme_store.id,
-                name=req.name or req.id or scheme_store.name,
-                nodes=[SchemeNode(**n) for n in req.nodes],
-                edges=[SchemeEdge(**e) for e in req.edges])
+            raw = migrate_scheme_data({
+                "id": req.id or scheme_store.id,
+                "name": req.name or req.id or scheme_store.name,
+                "nodes": req.nodes,
+                "edges": req.edges,
+            })
+            new_scheme = ProcessScheme.model_validate(raw)
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Invalid scheme: {e}")
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", new_scheme.id):
-            raise HTTPException(status_code=422, detail="Invalid scheme id")
+        try:
+            _scheme_path(new_scheme.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         scheme_store = new_scheme
         _save_current_scheme()
         _reconfigure(new_scheme)
@@ -1168,13 +1326,36 @@ def scheme_templates():
         ]
     }
 
+def _websocket_credential(websocket: WebSocket) -> tuple[str, Optional[str]]:
+    """Read a bearer token from a WebSocket subprotocol, not from the URL.
+
+    The query parameter remains a temporary compatibility fallback for older
+    clients, but the current frontend uses ``auth.<token>`` in the handshake so
+    credentials do not leak into access logs and browser history.
+    """
+    protocols = [
+        item.strip()
+        for item in websocket.headers.get("sec-websocket-protocol", "").split(",")
+        if item.strip()
+    ]
+    token = next((item[5:] for item in protocols if item.startswith("auth.")), "")
+    selected = "elou-avt" if "elou-avt" in protocols else None
+    if not token:
+        token = websocket.query_params.get("token", "")
+    return token, selected
+
+
 @app.websocket("/ws/simulation")
 async def websocket_simulation(websocket: WebSocket):
-    principal = authenticate_websocket(websocket.query_params.get("token", ""))
+    token, subprotocol = _websocket_credential(websocket)
+    principal = authenticate_websocket(token)
     if principal is None:
         await websocket.close(code=4401)
         return
-    await websocket.accept()
+    if not principal.has_permission("view_scheme"):
+        await websocket.close(code=4403)
+        return
+    await websocket.accept(subprotocol=subprotocol)
     try:
         while True:
             payload = _snapshot_state()
@@ -1196,11 +1377,18 @@ async def websocket_simulation(websocket: WebSocket):
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    principal = authenticate_websocket(websocket.query_params.get("token", ""))
+    token, subprotocol = _websocket_credential(websocket)
+    principal = authenticate_websocket(token)
     if principal is None:
         await websocket.close(code=4401)
         return
-    await websocket.accept()
+    if not (
+        principal.has_permission("view_dashboard")
+        or principal.has_permission("monitor_operators")
+    ):
+        await websocket.close(code=4403)
+        return
+    await websocket.accept(subprotocol=subprotocol)
     chat_register(websocket)
     try:
         while True:
@@ -1230,7 +1418,12 @@ def _safe_step() -> None:
         logger.error("Simulation step failed:\n%s", traceback.format_exc())
 
 
-def simulation_loop():
+_simulation_stop = threading.Event()
+_simulation_thread: Optional[threading.Thread] = None
+_simulation_thread_lock = threading.Lock()
+
+
+def simulation_loop(stop_event: threading.Event):
     """Advance the simulation by 1.0 s whole steps at a rate of speed * real time.
 
     Whole steps keep the physical timestep constant; the speed multiplier only
@@ -1243,8 +1436,7 @@ def simulation_loop():
     """
     acc = 0.0
     last = time.monotonic()
-    while True:
-        time.sleep(0.05)
+    while not stop_event.wait(0.05):
         now = time.monotonic()
         dt = now - last
         last = now
@@ -1272,7 +1464,53 @@ def simulation_loop():
         if elapsed > 1.0:
             acc = 0.0
 
-threading.Thread(target=simulation_loop, daemon=True).start()
+def _start_simulation_thread() -> None:
+    global _simulation_thread
+    with _simulation_thread_lock:
+        if _simulation_thread is not None and _simulation_thread.is_alive():
+            return
+        _simulation_stop.clear()
+        if twin._status.value != "RUNNING":
+            twin.start()
+        with lock:
+            _refresh_snapshot()
+        _simulation_thread = threading.Thread(
+            target=simulation_loop,
+            args=(_simulation_stop,),
+            name="elou-avt-simulation",
+            daemon=True,
+        )
+        _simulation_thread.start()
+
+
+def _stop_simulation_thread() -> None:
+    global _simulation_thread, session_store, session_recorder
+    with _simulation_thread_lock:
+        thread = _simulation_thread
+        _simulation_stop.set()
+    if thread is not None:
+        thread.join(timeout=5.0)
+    with _simulation_thread_lock:
+        _simulation_thread = None
+    with lock:
+        twin.stop()
+        if session_store is not None:
+            session_store.close()
+            session_store = None
+            session_recorder = None
+            lms_runtime.configure(twin, scheme_store, None, None, inputs)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _start_simulation_thread()
+    try:
+        yield
+    finally:
+        _stop_simulation_thread()
+
+
+app.router.lifespan_context = _lifespan
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,47 +1,43 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes } from 'react-router-dom';
-import LoginPage from './pages/LoginPage';
 import { AuthProvider, RequireAuth, RequirePermission, ROLE_LABELS, useAuth } from './auth';
 import { ThemeProvider, useTheme } from './lms/theme';
 
-// ---- Кабинет оператора ----
-import OperatorHomePage from './pages/operator/HomePage';
-import CoursesPage from './pages/operator/CoursesPage';
-import PracticePage from './pages/operator/PracticePage';
-import ExamsPage from './pages/operator/ExamsPage';
-import CompetenciesPage from './pages/operator/CompetenciesPage';
-import HistoryPage from './pages/operator/HistoryPage';
-import ProfilePage from './pages/operator/ProfilePage';
-import ModuleStudyPage from './pages/operator/ModuleStudyPage';
-
-// ---- Кабинет инструктора ----
-import InstructorHomePage from './pages/instructor/HomePage';
-import InstructorGroupsPage from './pages/instructor/GroupsPage';
-import GroupDetailPage from './pages/instructor/GroupDetailPage';
-import InstructorCoursesPage from './pages/instructor/CoursesPage';
-import InstructorTasksPage from './pages/instructor/TasksPage';
-import MonitoringPage from './pages/instructor/MonitoringPage';
-import AnalyticsPage from './pages/instructor/AnalyticsPage';
-import ModuleConstructorPage from './pages/instructor/ModuleConstructorPage';
-
-// ---- Кабинет администратора ----
-import AdminUsersPage from './pages/admin/UsersPage';
-import RolesPage from './pages/admin/RolesPage';
-import AdminGroupsPage from './pages/admin/GroupsPage';
-import AdminCoursesPage from './pages/admin/CoursesPage';
-import AdminTasksPage from './pages/admin/TasksPage';
-import AdminScenariosPage from './pages/admin/ScenariosPage';
-import SettingsPage from './pages/admin/SettingsPage';
-import LogsPage from './pages/admin/LogsPage';
-import FieldOperatorScreen from './pages/admin/FieldOperatorScreen';
-
-// ---- Общие ----
-import PracticeRunner from './pages/PracticeRunner';
-import DebriefPage from './pages/DebriefPage';
-import HmiPage from './pages/HmiPage';
-import ChatWidget from './components/ChatWidget';
-import PracticeInvite from './components/PracticeInvite';
+// Route-level code splitting keeps the login and each role cabinet small. In
+// particular, SCADA, ECharts and authoring code no longer block the field
+// operator screen before its 3D iframe can start loading.
+const LoginPage = React.lazy(() => import('./pages/LoginPage'));
+const OperatorHomePage = React.lazy(() => import('./pages/operator/HomePage'));
+const CoursesPage = React.lazy(() => import('./pages/operator/CoursesPage'));
+const PracticePage = React.lazy(() => import('./pages/operator/PracticePage'));
+const ExamsPage = React.lazy(() => import('./pages/operator/ExamsPage'));
+const CompetenciesPage = React.lazy(() => import('./pages/operator/CompetenciesPage'));
+const HistoryPage = React.lazy(() => import('./pages/operator/HistoryPage'));
+const ProfilePage = React.lazy(() => import('./pages/operator/ProfilePage'));
+const ModuleStudyPage = React.lazy(() => import('./pages/operator/ModuleStudyPage'));
+const InstructorHomePage = React.lazy(() => import('./pages/instructor/HomePage'));
+const InstructorGroupsPage = React.lazy(() => import('./pages/instructor/GroupsPage'));
+const GroupDetailPage = React.lazy(() => import('./pages/instructor/GroupDetailPage'));
+const InstructorCoursesPage = React.lazy(() => import('./pages/instructor/CoursesPage'));
+const InstructorTasksPage = React.lazy(() => import('./pages/instructor/TasksPage'));
+const MonitoringPage = React.lazy(() => import('./pages/instructor/MonitoringPage'));
+const AnalyticsPage = React.lazy(() => import('./pages/instructor/AnalyticsPage'));
+const ModuleConstructorPage = React.lazy(() => import('./pages/instructor/ModuleConstructorPage'));
+const AdminUsersPage = React.lazy(() => import('./pages/admin/UsersPage'));
+const RolesPage = React.lazy(() => import('./pages/admin/RolesPage'));
+const AdminGroupsPage = React.lazy(() => import('./pages/admin/GroupsPage'));
+const AdminCoursesPage = React.lazy(() => import('./pages/admin/CoursesPage'));
+const AdminTasksPage = React.lazy(() => import('./pages/admin/TasksPage'));
+const AdminScenariosPage = React.lazy(() => import('./pages/admin/ScenariosPage'));
+const SettingsPage = React.lazy(() => import('./pages/admin/SettingsPage'));
+const LogsPage = React.lazy(() => import('./pages/admin/LogsPage'));
+const FieldOperatorScreen = React.lazy(() => import('./pages/admin/FieldOperatorScreen'));
+const PracticeRunner = React.lazy(() => import('./pages/PracticeRunner'));
+const DebriefPage = React.lazy(() => import('./pages/DebriefPage'));
+const HmiPage = React.lazy(() => import('./pages/HmiPage'));
+const ChatWidget = React.lazy(() => import('./components/ChatWidget'));
+const PracticeInvite = React.lazy(() => import('./components/PracticeInvite'));
 
 import './index.css';
 
@@ -224,6 +220,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
+          <React.Suspense fallback={<div className="auth-loading">Загрузка интерфейса…</div>}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<RequireAuth><Shell /></RequireAuth>}>
@@ -263,6 +260,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
               <Route path="*" element={<HomeRedirect />} />
             </Route>
           </Routes>
+          </React.Suspense>
         </AuthProvider>
       </BrowserRouter>
     </ThemeProvider>

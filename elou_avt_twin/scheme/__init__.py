@@ -18,6 +18,7 @@ from .model import (
     load_scheme,
     save_scheme,
     migrate_scheme_data,
+    normalize_duplicate_ids,
     DEFAULT_SCHEME_PATH,
     SCHEMA_VERSION,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "load_scheme",
     "save_scheme",
     "migrate_scheme_data",
+    "normalize_duplicate_ids",
     "DEFAULT_SCHEME_PATH",
     "SCHEMA_VERSION",
     "validate_scheme",

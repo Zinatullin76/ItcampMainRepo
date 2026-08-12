@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 
@@ -42,7 +43,7 @@ class SchemeEdge(BaseModel):
     kind: str = "process"
 
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 
 class ProcessScheme(BaseModel):
@@ -79,6 +80,78 @@ class ProcessScheme(BaseModel):
         self.edges.append(edge)
 
 
+def _unique_id(base: str, used: set[str], occurrence: int) -> str:
+    """Return a deterministic ID without discarding a duplicated object."""
+    suffix = max(2, occurrence)
+    candidate = f"{base}__dup{suffix}"
+    while candidate in used:
+        suffix += 1
+        candidate = f"{base}__dup{suffix}"
+    return candidate
+
+
+def normalize_duplicate_ids(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Make node and edge IDs unique while preserving every graph object.
+
+    Legacy editor versions could write several objects with the same ID.
+    React Flow and the simulation engine both use IDs as dictionary keys, so
+    the later objects became inaccessible.  The migration keeps the first ID
+    (and therefore all existing edge references) and deterministically renames
+    subsequent occurrences to ``<id>__dupN``.  We deliberately do not guess
+    which ambiguous legacy edge belonged to which duplicate: guessing could
+    silently rewire a process.  The preserved duplicate stays available for an
+    instructor to reconnect explicitly in the scheme editor.
+    """
+    result = dict(data)
+    nodes = [dict(node) for node in (data.get("nodes") or [])]
+    edges = [dict(edge) for edge in (data.get("edges") or [])]
+
+    node_counts: defaultdict[str, int] = defaultdict(int)
+    used_node_ids = {str(node.get("id", "")) for node in nodes}
+    renamed_nodes: list[tuple[str, str]] = []
+    for node in nodes:
+        original = str(node.get("id", "")).strip()
+        node_counts[original] += 1
+        if node_counts[original] == 1:
+            node["id"] = original
+            continue
+        replacement = _unique_id(original or "node", used_node_ids, node_counts[original])
+        used_node_ids.add(replacement)
+        node["id"] = replacement
+        renamed_nodes.append((original, replacement))
+
+    edge_counts: defaultdict[str, int] = defaultdict(int)
+    used_edge_ids = {str(edge.get("id", "")) for edge in edges}
+    renamed_edges: list[tuple[str, str]] = []
+    for edge in edges:
+        original = str(edge.get("id", "")).strip()
+        edge_counts[original] += 1
+        if edge_counts[original] == 1:
+            edge["id"] = original
+            continue
+        replacement = _unique_id(original or "edge", used_edge_ids, edge_counts[original])
+        used_edge_ids.add(replacement)
+        edge["id"] = replacement
+        renamed_edges.append((original, replacement))
+
+    if renamed_nodes:
+        logger.warning(
+            "Preserved %d node(s) with duplicate IDs by assigning deterministic suffixes: %s",
+            len(renamed_nodes),
+            ", ".join(f"{old!r}->{new!r}" for old, new in renamed_nodes),
+        )
+    if renamed_edges:
+        logger.warning(
+            "Preserved %d edge(s) with duplicate IDs by assigning deterministic suffixes: %s",
+            len(renamed_edges),
+            ", ".join(f"{old!r}->{new!r}" for old, new in renamed_edges),
+        )
+
+    result["nodes"] = nodes
+    result["edges"] = edges
+    return result
+
+
 def migrate_scheme_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """Migrate legacy scheme JSON to the current schema (ТЗ section 6).
 
@@ -90,7 +163,7 @@ def migrate_scheme_data(data: Dict[str, Any]) -> Dict[str, Any]:
     working, but the canonical names take precedence in the physics core.
     """
     version = data.get("schema_version", "1.0")
-    data = dict(data)
+    data = normalize_duplicate_ids(data)
     nodes = data.get("nodes", [])
     new_nodes = []
     for node in nodes:

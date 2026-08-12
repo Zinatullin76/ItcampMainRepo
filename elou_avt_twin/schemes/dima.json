@@ -1089,7 +1089,7 @@
       "target_port": "circ1_in"
     }
   ],
-  "id": "default",
+  "id": "dima",
   "name": "ЭЛОУ-АВТ / default",
   "nodes": [
     {
@@ -1211,7 +1211,7 @@
       "y": -1788.0
     },
     {
-      "id": "source_7",
+      "id": "source_7__dup2",
       "name": "Источник сырья",
       "params": {
         "flow_kg_s": 100,
@@ -1231,7 +1231,7 @@
       "y": -1832.0
     },
     {
-      "id": "sink_10",
+      "id": "sink_10__dup2",
       "name": "Продукт / отбор",
       "params": {},
       "type": "sink",
@@ -1616,18 +1616,20 @@
       "name": "Н1-А",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": -157.0,
       "y": -722.0
     },
     {
-      "id": "pum_8",
+      "id": "pum_8__dup2",
       "name": "Н1-Б",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": -160.0,
@@ -1638,7 +1640,8 @@
       "name": "Н1-В",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": -160.0,
@@ -1679,7 +1682,7 @@
       "y": -723.0
     },
     {
-      "id": "source_13",
+      "id": "source_13__dup2",
       "name": "ц.о. К-2",
       "params": {
         "flow_kg_s": 100,
@@ -1769,6 +1772,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -1780,6 +1784,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -1791,6 +1796,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -2106,7 +2112,8 @@
       "name": "Н-20А",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 1777.0,
@@ -2117,7 +2124,8 @@
       "name": "Н20-Б",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 1777.0,
@@ -2205,6 +2213,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -2216,6 +2225,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -2227,6 +2237,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -2259,7 +2270,8 @@
       "name": "Н-6А",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 3539.0,
@@ -2433,6 +2445,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -2942,7 +2955,8 @@
       "name": "Н-3А",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 3058.0,
@@ -2965,7 +2979,8 @@
       "name": "Н-2А",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 3296.0,
@@ -2976,7 +2991,8 @@
       "name": "Н-2Б",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 3295.0,
@@ -2987,7 +3003,8 @@
       "name": "Н-6К/1",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 3342.0,
@@ -3874,6 +3891,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -3885,7 +3903,8 @@
       "name": "Н-32А",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 4129.0,
@@ -3896,7 +3915,8 @@
       "name": "Н-4А",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 4130.0,
@@ -3907,7 +3927,8 @@
       "name": "Н-4",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 4130.0,
@@ -3918,7 +3939,8 @@
       "name": "Н-32",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 4129.0,
@@ -3929,6 +3951,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -3948,6 +3971,7 @@
       "name": "Регулирующий клапан",
       "params": {
         "cv": 0.01,
+        "flow_coefficient_si": 0.01,
         "response_rate": 0.2
       },
       "type": "valve",
@@ -3987,7 +4011,8 @@
       "name": "Н-12А",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": 3563.0,
@@ -4014,5 +4039,5 @@
       "y": -92.0
     }
   ],
-  "schema_version": "1.1"
+  "schema_version": "1.2"
 }

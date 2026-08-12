@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
 from typing import Optional
 
@@ -69,8 +70,15 @@ def _unb64url(text: str) -> bytes:
 
 
 def create_token(secret: str, subject: str, *, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
+    if not secret or not subject:
+        raise ValueError("Token secret and subject are required")
     now = int(time.time())
-    payload = {"sub": subject, "iat": now, "exp": now + ttl_seconds}
+    payload = {
+        "sub": subject,
+        "iat": now,
+        "exp": now + int(ttl_seconds),
+        "jti": secrets.token_urlsafe(12),
+    }
     body = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     sig = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{body}.{sig}"
@@ -78,12 +86,20 @@ def create_token(secret: str, subject: str, *, ttl_seconds: int = DEFAULT_TTL_SE
 
 def verify_token(secret: str, token: str) -> Optional[dict]:
     try:
+        if not secret or not token or len(token) > 4096:
+            return None
         body, sig = token.rsplit(".", 1)
         expected = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return None
         payload = json.loads(_unb64url(body))
-        if int(payload.get("exp", 0)) < time.time():
+        now = time.time()
+        issued_at = int(payload.get("iat", 0))
+        expires_at = int(payload.get("exp", 0))
+        subject = payload.get("sub")
+        if not isinstance(subject, str) or not subject or len(subject) > 64:
+            return None
+        if issued_at > now + 60 or expires_at <= now or expires_at <= issued_at:
             return None
         return payload
     except Exception:

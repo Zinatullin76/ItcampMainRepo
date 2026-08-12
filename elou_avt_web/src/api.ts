@@ -74,6 +74,7 @@ export interface LoginResponse {
 }
 
 const TOKEN_KEY = 'elou_avt_token';
+const REQUEST_TIMEOUT_MS = 15_000;
 
 // Токен хранится в sessionStorage (на вкладку), а не в localStorage:
 // консольный и полевой операторы работают в разных окнах, и общая запись
@@ -88,24 +89,57 @@ export const authStore = {
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const token = authStore.getToken();
   const headers = new Headers(init?.headers);
-  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (init?.body != null && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  const res = await fetch(url, { ...init, headers });
-  if (res.status === 401) authStore.setToken(null);
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+  const controller = init?.signal ? null : new AbortController();
+  const timeout = controller
+    ? window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    : null;
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers,
+      signal: init?.signal ?? controller?.signal,
+    });
+    if (res.status === 401) authStore.setToken(null);
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 2_000);
+      let detail = body;
+      if (body && res.headers.get('content-type')?.includes('application/json')) {
+        try {
+          const parsed = JSON.parse(body) as { detail?: unknown };
+          if (typeof parsed.detail === 'string') detail = parsed.detail;
+        } catch {
+          // Keep the bounded response text when an upstream proxy returns bad JSON.
+        }
+      }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
+    if (res.status === 204) return undefined as T;
+    return (await res.json()) as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Сервер не ответил вовремя. Повторите запрос.');
+    }
+    throw error;
+  } finally {
+    if (timeout != null) window.clearTimeout(timeout);
+  }
 }
 
 function wsUrl(): string {
-  const token = authStore.getToken() ?? '';
-  const base = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/simulation`;
-  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/simulation`;
 }
 
 function chatWsUrl(): string {
-  const token = authStore.getToken() ?? '';
-  const base = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/chat`;
-  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/chat`;
+}
+
+function wsProtocols(): string[] {
+  const token = authStore.getToken();
+  return token ? ['elou-avt', `auth.${token}`] : ['elou-avt'];
 }
 
 export const api = {
@@ -253,7 +287,7 @@ export const api = {
     json<{ ok: boolean; controller: ControllerSnap }>('/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tag, action, value: value ?? null, operator_id: 'hmi' }),
+      body: JSON.stringify({ tag, action, value: value ?? null }),
     }),
 
   // ---- LMS: оператор ----
@@ -495,10 +529,13 @@ export const api = {
 
 export function connectWs(onState: (s: ApiState) => void): () => void {
   let ws: WebSocket | null = null;
+  let reconnectTimer: number | null = null;
   let retry = 0;
+  let stopped = false;
 
   const open = () => {
-    ws = new WebSocket(wsUrl());
+    if (stopped || ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+    ws = new WebSocket(wsUrl(), wsProtocols());
     ws.onmessage = (e) => {
       try {
         onState(JSON.parse(e.data as string) as ApiState);
@@ -506,23 +543,45 @@ export function connectWs(onState: (s: ApiState) => void): () => void {
         /* ignore malformed frame */
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      ws = null;
+      if (stopped) return;
+      if (event.code === 4401) {
+        authStore.setToken(null);
+        return;
+      }
+      if (event.code === 4403) return;
       retry += 1;
-      if (retry < 5) setTimeout(open, 2000 * retry);
+      const delay = Math.min(30_000, 1_000 * 2 ** Math.min(retry, 5));
+      reconnectTimer = window.setTimeout(open, delay);
     };
     ws.onopen = () => (retry = 0);
   };
 
   open();
-  return () => ws?.close();
+  const onOnline = () => open();
+  window.addEventListener('online', onOnline);
+  return () => {
+    stopped = true;
+    window.removeEventListener('online', onOnline);
+    if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
+    if (ws) {
+      ws.onclose = null;
+      ws.close();
+      ws = null;
+    }
+  };
 }
 
 export function connectChat(onMessage: (m: ChatMessage) => void): () => void {
   let ws: WebSocket | null = null;
+  let reconnectTimer: number | null = null;
   let retry = 0;
+  let stopped = false;
 
   const open = () => {
-    ws = new WebSocket(chatWsUrl());
+    if (stopped || ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+    ws = new WebSocket(chatWsUrl(), wsProtocols());
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data as string) as { type: string } & ChatMessage;
@@ -531,13 +590,32 @@ export function connectChat(onMessage: (m: ChatMessage) => void): () => void {
         /* ignore malformed frame */
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      ws = null;
+      if (stopped) return;
+      if (event.code === 4401) {
+        authStore.setToken(null);
+        return;
+      }
+      if (event.code === 4403) return;
       retry += 1;
-      if (retry < 5) setTimeout(open, 2000 * retry);
+      const delay = Math.min(30_000, 1_000 * 2 ** Math.min(retry, 5));
+      reconnectTimer = window.setTimeout(open, delay);
     };
     ws.onopen = () => (retry = 0);
   };
 
   open();
-  return () => ws?.close();
+  const onOnline = () => open();
+  window.addEventListener('online', onOnline);
+  return () => {
+    stopped = true;
+    window.removeEventListener('online', onOnline);
+    if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
+    if (ws) {
+      ws.onclose = null;
+      ws.close();
+      ws = null;
+    }
+  };
 }

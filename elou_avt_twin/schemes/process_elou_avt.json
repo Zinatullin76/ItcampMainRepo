@@ -774,7 +774,8 @@
       "name": "Н-1 сырьевые насосы",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 0.12
+        "nominal_flow": 0.12,
+        "nominal_volumetric_flow_m3_s": 0.12
       },
       "type": "pump",
       "x": 300.0,
@@ -784,7 +785,8 @@
       "id": "pump_H20",
       "name": "Н-20 подача обессоленной нефти в К-1",
       "params": {
-        "nominal_flow": 0.12
+        "nominal_flow": 0.12,
+        "nominal_volumetric_flow_m3_s": 0.12
       },
       "type": "pump",
       "x": 1500.0,
@@ -794,7 +796,8 @@
       "id": "pump_H6",
       "name": "Н-6 нестабильный бензин в К-4",
       "params": {
-        "nominal_flow": 0.05
+        "nominal_flow": 0.05,
+        "nominal_volumetric_flow_m3_s": 0.05
       },
       "type": "pump",
       "x": 820.0,
@@ -804,7 +807,8 @@
       "id": "pump_H2",
       "name": "Н-2/Н-3 отбензиненная нефть в печи",
       "params": {
-        "nominal_flow": 0.1
+        "nominal_flow": 0.1,
+        "nominal_volumetric_flow_m3_s": 0.1
       },
       "type": "pump",
       "x": 1820.0,
@@ -814,7 +818,8 @@
       "id": "pump_H4",
       "name": "Н-4 откачка мазута из К-2",
       "params": {
-        "nominal_flow": 0.08
+        "nominal_flow": 0.08,
+        "nominal_volumetric_flow_m3_s": 0.08
       },
       "type": "pump",
       "x": 2380.0,
@@ -824,7 +829,8 @@
       "id": "pump_H58",
       "name": "Н-58 фр. 105–180 °С из К-10",
       "params": {
-        "nominal_flow": 0.03
+        "nominal_flow": 0.03,
+        "nominal_volumetric_flow_m3_s": 0.03
       },
       "type": "pump",
       "x": 3700.0,
@@ -835,6 +841,7 @@
       "name": "FV-1/2/3 подача сырья",
       "params": {
         "cv": 0.02,
+        "flow_coefficient_si": 0.02,
         "initial_position": 0.6,
         "response_rate": 0.2
       },
@@ -847,6 +854,7 @@
       "name": "PV-1 давление верха К-1",
       "params": {
         "cv": 0.0022,
+        "flow_coefficient_si": 0.0022,
         "initial_position": 0.5,
         "response_rate": 0.15
       },
@@ -859,6 +867,7 @@
       "name": "PV-2 давление верха К-2",
       "params": {
         "cv": 0.0022,
+        "flow_coefficient_si": 0.0022,
         "initial_position": 0.5,
         "response_rate": 0.15
       },
@@ -871,6 +880,7 @@
       "name": "PV-4 давление верха К-4",
       "params": {
         "cv": 0.0012,
+        "flow_coefficient_si": 0.0012,
         "initial_position": 0.5,
         "response_rate": 0.15
       },
@@ -883,6 +893,7 @@
       "name": "FV-12 орошение/отбор НК–62 (К-9)",
       "params": {
         "cv": 0.0022,
+        "flow_coefficient_si": 0.0022,
         "initial_position": 0.7,
         "response_rate": 0.2
       },
@@ -895,6 +906,7 @@
       "name": "FV-11 орошение/отбор 62–105 (К-10)",
       "params": {
         "cv": 0.0021,
+        "flow_coefficient_si": 0.0021,
         "initial_position": 0.7,
         "response_rate": 0.2
       },
@@ -907,6 +919,7 @@
       "name": "FV-13 отбор фр. 140–240 на К-12",
       "params": {
         "cv": 0.0019,
+        "flow_coefficient_si": 0.0019,
         "initial_position": 0.8,
         "response_rate": 0.2
       },
@@ -1694,5 +1707,5 @@
       "y": 100.0
     }
   ],
-  "schema_version": "1.1"
+  "schema_version": "1.2"
 }

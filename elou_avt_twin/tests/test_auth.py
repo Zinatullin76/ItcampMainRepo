@@ -282,7 +282,8 @@ def test_get_current_user_bad_token_401(svc):
     assert e.value.status_code == 401
 
 
-def test_fallback_system_in_disabled_mode(svc):
+def test_fallback_system_in_disabled_mode(svc, monkeypatch):
+    monkeypatch.setattr(deps, "AUTH_MODE", "disabled")
     principal = deps.get_current_user(_FakeRequest(""))
     assert principal.is_system
     assert principal.has_permission("manage_users")
@@ -317,6 +318,7 @@ def test_require_permission_forbids_403(svc):
     assert e.value.status_code == 403
 
 
-def test_require_permission_system_in_disabled_mode(svc):
+def test_require_permission_system_in_disabled_mode(svc, monkeypatch):
+    monkeypatch.setattr(deps, "AUTH_MODE", "disabled")
     gate = deps.require_permission("grade_exam")
     assert gate(current_user=deps.get_current_user(_FakeRequest(""))).is_system

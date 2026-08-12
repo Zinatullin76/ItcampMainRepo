@@ -1865,7 +1865,7 @@
       "target_port": "in"
     }
   ],
-  "id": "default",
+  "id": "rebul",
   "name": "ЭЛОУ-АВТ / default",
   "nodes": [
     {
@@ -1917,7 +1917,7 @@
       "y": -722.0
     },
     {
-      "id": "pum_8",
+      "id": "pum_8__dup2",
       "name": "Н1-Б",
       "params": {
         "efficiency_nominal": 0.75,
@@ -1975,7 +1975,7 @@
       "y": -723.0
     },
     {
-      "id": "source_13",
+      "id": "source_13__dup2",
       "name": "ц.о. К-2",
       "params": {
         "flow_kg_s": 19,
@@ -5768,7 +5768,8 @@
       "name": "Насос",
       "params": {
         "efficiency_nominal": 0.75,
-        "nominal_flow": 100
+        "nominal_flow": 100,
+        "nominal_volumetric_flow_m3_s": 100
       },
       "type": "pump",
       "x": -785.0,
@@ -5889,7 +5890,7 @@
       "y": 836.0
     },
     {
-      "id": "source_13",
+      "id": "source_13__dup3",
       "name": "ц.о. К-2",
       "params": {
         "flow_kg_s": 19,
@@ -5927,5 +5928,5 @@
       "y": -74.0
     }
   ],
-  "schema_version": "1.1"
+  "schema_version": "1.2"
 }
