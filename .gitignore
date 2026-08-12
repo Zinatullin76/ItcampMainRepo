@@ -1,0 +1,35 @@
+# ---- Python (elou_avt_twin) ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.log
+.DS_Store
+
+# ---- Runtime database (regenerates on start) ----
+elou_avt_twin/sessions.db
+elou_avt_twin/sessions.db-wal
+elou_avt_twin/sessions.db-shm
+*.db-wal
+*.db-shm
+
+# ---- Secrets & local config ----
+opencode1.json
+*.env
+.env
+config/local_config.json
+
+# ---- Frontend (elou_avt_web) ----
+node_modules/
+elou_avt_web/node_modules/
+elou_avt_web/dist/
+dist/
+*.tsbuildinfo
+*.tsbuildinfo.json

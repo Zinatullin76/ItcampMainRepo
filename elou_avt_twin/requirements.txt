@@ -1,0 +1,7 @@
+numpy>=1.26,<3
+scipy>=1.11,<2
+exceptiongroup>=1.2,<2
+pydantic>=2.5,<3
+pytest>=7.4,<9
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
