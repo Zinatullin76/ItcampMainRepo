@@ -761,7 +761,7 @@ export interface FieldErrorsResponse {
   invited_me?: boolean;
 }
 
-export type ChatMessageKind = 'text' | 'field_error' | 'system';
+export type ChatMessageKind = 'text' | 'field_error' | 'equipment_check' | 'system';
 
 export interface ChatMessage {
   id: number;

@@ -16,7 +16,7 @@ import type { Connection, Edge, EdgeMouseHandler, NodeMouseHandler } from '@xyfl
 import '@xyflow/react/dist/style.css';
 
 import { api, connectWs } from '../api';
-import type { ApiState, HistoryResponse, Scheme, SchemeNodeData, SchemeEdgeData, NodeTelemetry, ScadaLogEventType } from '../types';
+import type { ApiState, FieldErrorsResponse, HistoryResponse, Scheme, SchemeNodeData, SchemeEdgeData, NodeTelemetry, ScadaLogEventType } from '../types';
 import { useAuth } from '../auth';
 import { PALETTE, createNode, nodeSizeFor, mnemoForNode, phaseMeta, normalizePhase, PHASE_TYPES, DEFAULT_PHASE } from '../schemeConfig';
 import { mnemoLayout } from '../layout';
@@ -229,6 +229,7 @@ function HmiInner() {
   const [currentScheme, setCurrentScheme] = useState('default');
   const [scenario, setScenario] = useState('');
   const [msg, setMsg] = useState('');
+  const [practiceContext, setPracticeContext] = useState<FieldErrorsResponse | null>(null);
   const [dispMap, setDispMap] = useState<Record<string, string[]>>(loadDisp);
   const [tagsMap, setTagsMap] = useState<Record<string, Record<string, TagCfg>>>(loadTags);
   const [edgeCfg, setEdgeCfg] = useState<Record<string, EdgeCfg>>(loadEdgeCfg);
@@ -250,6 +251,39 @@ function HmiInner() {
     },
     [],
   );
+
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        const context = await api.lmsFieldErrors();
+        if (alive) setPracticeContext(context);
+      } catch {
+        if (alive) setPracticeContext(null);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, []);
+
+  const canRequestFieldCheck = Boolean(
+    practiceContext?.active && practiceContext.multi_operator
+    && practiceContext.status === 'RUNNING'
+    && (user?.roles ?? []).includes('operator'),
+  );
+
+  const requestFieldCheck = useCallback(async (equipmentId: string, equipmentName: string) => {
+    const sessionId = practiceContext?.session_id;
+    if (!sessionId || !canRequestFieldCheck) throw new Error('Нет активной мультиоператорной практики');
+    await api.chatSend({
+      session_id: sessionId,
+      kind: 'equipment_check',
+      object_id: equipmentId,
+      text: `Проверьте оборудование «${equipmentName}» (${equipmentId}) и сообщите о его состоянии.`,
+    });
+    logScada('inspector_open', equipmentId, `Запрос полевому: ${equipmentName}`);
+  }, [practiceContext?.session_id, canRequestFieldCheck, logScada]);
 
   const closeInspector = useCallback(() => {
     const cur = inspectorRef.current;
@@ -1054,6 +1088,7 @@ function HmiInner() {
               onUpdateSchemeParam={onUpdateSchemeParam}
               canEditScheme={canEditScheme && edit}
               canManageTwin={canManageTwin}
+              onRequestFieldCheck={canRequestFieldCheck ? requestFieldCheck : undefined}
             />
           )}
           {!selectedEdgeId && (

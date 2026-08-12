@@ -22,6 +22,7 @@ interface Props {
   canEditScheme?: boolean;
   canManageTwin?: boolean;
   readOnly?: boolean;
+  onRequestFieldCheck?: (equipmentId: string, equipmentName: string) => Promise<void>;
 }
 
 const PA_PER_ATM = 101325;
@@ -43,7 +44,7 @@ const toDisplay = (unit: string, v: number | null): string => {
 const toEngine = (unit: string, s: string): number =>
   Number(unit === 'Pa' ? Number(s) * PA_PER_ATM : s);
 
-export default function Inspector({ nodeId, nodeName, nodeType, schemeParams, telemetry, history = null, disp = [], onUpdateDisp, onAction, onFailure, onRename, onDelete, onUpdateParams, onUpdateSchemeParam, canEditScheme = true, canManageTwin = true, readOnly = false }: Props) {
+export default function Inspector({ nodeId, nodeName, nodeType, schemeParams, telemetry, history = null, disp = [], onUpdateDisp, onAction, onFailure, onRename, onDelete, onUpdateParams, onUpdateSchemeParam, canEditScheme = true, canManageTwin = true, readOnly = false, onRequestFieldCheck }: Props) {
   const [valvePos, setValvePos] = useState(60);
   const [fuel, setFuel] = useState(0.8);
   const [reflux, setReflux] = useState(2.0);
@@ -57,6 +58,7 @@ export default function Inspector({ nodeId, nodeName, nodeType, schemeParams, te
   const [alarmDraft, setAlarmDraft] = useState<Record<string, { low_low: string; low: string; high: string; high_high: string }>>({});
   const [alarmMsg, setAlarmMsg] = useState<string>('');
   const [trendParam, setTrendParam] = useState('');
+  const [fieldRequestState, setFieldRequestState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const hydratedNode = useRef<string | null>(null);
   const nameHydrated = useRef<string | null>(null);
 
@@ -88,6 +90,7 @@ export default function Inspector({ nodeId, nodeName, nodeType, schemeParams, te
     setAlarmSetpoints([]);
     setAlarmDraft({});
     setAlarmMsg('');
+    setFieldRequestState('idle');
     if (!nodeId) return;
     api.getEquipmentSpec(nodeId)
       .then((s) => {
@@ -477,6 +480,23 @@ export default function Inspector({ nodeId, nodeName, nodeType, schemeParams, te
       <div style={{ color: telemetry.failed ? '#f87171' : '#35d399', fontSize: 11, fontWeight: 700, margin: '4px 0 10px' }}>
         ● {statusText}
       </div>
+      {onRequestFieldCheck && (
+        <div className="ctrl-group" style={{ marginBottom: 10 }}>
+          <button className="btn btn-warn" disabled={fieldRequestState === 'sending'} onClick={async () => {
+            setFieldRequestState('sending');
+            try {
+              await onRequestFieldCheck(nodeId, nodeName || nodeId);
+              setFieldRequestState('sent');
+            } catch {
+              setFieldRequestState('error');
+            }
+          }}>
+            {fieldRequestState === 'sending' ? 'Отправляем…' : 'Попросить полевого проверить'}
+          </button>
+          {fieldRequestState === 'sent' && <div className="inspector-hint">Запрос отправлен полевому оператору.</div>}
+          {fieldRequestState === 'error' && <div className="inspector-hint" style={{ color: 'var(--danger)' }}>Не удалось отправить запрос.</div>}
+        </div>
+      )}
       <div className="param-list">{paramRows}</div>
       {nodeSeries.length > 0 && (
         <div style={{ marginTop: 12 }}>

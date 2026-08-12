@@ -95,12 +95,12 @@ export default function ChatWidget({ title = 'Чат операторов' }: { 
               </div>
             )}
             {messages.map((m) => (
-              <div key={m.id} className={`chat-msg${m.kind === 'field_error' ? ' field-error' : ''}`}>
+              <div key={m.id} className={`chat-msg${m.kind === 'field_error' || m.kind === 'equipment_check' ? ' field-error' : ''}`}>
                 <div className="chat-msg-head">
                   <span className="chat-msg-author">{m.author || 'система'}</span>
                   <span className="chat-msg-time">{fmtTime(m.created_at)}</span>
                 </div>
-                {m.kind === 'field_error' && m.object_id && (
+                {(m.kind === 'field_error' || m.kind === 'equipment_check') && m.object_id && (
                   <span className="chat-msg-tag">{m.object_id}</span>
                 )}
                 <div className="chat-msg-text">{m.text}</div>

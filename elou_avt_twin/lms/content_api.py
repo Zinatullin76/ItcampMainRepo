@@ -531,6 +531,24 @@ def field_errors(current_user: Principal = Depends(get_current_user)):
 
 @router.post("/chat/send", dependencies=[Depends(_require_practice_chat)])
 def chat_send(req: ChatWrite, current_user: Principal = Depends(get_current_user)):
+    if req.kind == "equipment_check":
+        recorder = lms_runtime.get_session_recorder()
+        if recorder is None or not recorder.active or recorder.session_id != req.session_id:
+            raise HTTPException(status_code=409, detail="Нет активной практики для запроса")
+        if "operator" not in current_user.roles:
+            raise HTTPException(status_code=403, detail="Запрос проверки отправляет консольный оператор")
+        session_store = lms_runtime.get_session_store()
+        session = session_store.get_session(req.session_id) if session_store else None
+        scenario_id = session.get("scenario_id", "") if session else ""
+        try:
+            sid = int(scenario_id.split("-", 1)[1]) if scenario_id.startswith("LMS-") else int(scenario_id)
+            scenario = get_service().store.get_scenario(sid)
+        except (TypeError, ValueError):
+            scenario = None
+        if not scenario or not scenario.get("multi_operator"):
+            raise HTTPException(status_code=409, detail="Сценарий не является мультиоператорным")
+        if not req.object_id.strip():
+            raise HTTPException(status_code=422, detail="Оборудование не выбрано")
     msg = get_service().lms.add_chat_message(
         req.session_id, current_user.username, req.kind, req.object_id, req.text)
     chat_broadcast({"type": "chat_message", **msg})
